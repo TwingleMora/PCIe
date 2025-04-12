@@ -23,6 +23,8 @@ wire [ADDR_WIDTH-2:0] WrAddr = WrCounter[ADDR_WIDTH-2:0];
 wire [ADDR_WIDTH-2:0] RdAddr = RdCounter[ADDR_WIDTH-2:0];
 
 reg [DATA_WIDTH-1:0] mem [2**(ADDR_WIDTH-1)];
+
+
 always@(posedge clk or negedge rst)
 begin
     if(!rst)

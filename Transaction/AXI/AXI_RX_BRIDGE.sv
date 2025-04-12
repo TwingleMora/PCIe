@@ -1,4 +1,4 @@
-module MASTER_BRIDGE
+module MASTER_BRIDGE #(parameter DATA_WIDTH = 32, parameter ADDR_WIDTH = 64)
 (
     input logic         PCLK,
     input logic         PRESETn,
@@ -25,16 +25,17 @@ module MASTER_BRIDGE
     
     input  logic  [3:0]     first_dw_be,
     input  logic  [3:0]     last_dw_be,
+    input  logic  [9:0]     length,
     input  logic  [31:0]    lower_addr,
 
+    input  logic  [11:0]    config_dw_number,
     //calculate OFFSET and M_PSTRB
 
-    input  logic             last_dw,
-    input  logic  [31:0]     data,
-    input  logic             DATA_BUFF_EMPTY,
-    output logic             DATA_BUFF_RD_EN,
+    input  logic                        last_dw,
+    input  logic  [DATA_WIDTH-1:0]      data,
+    input  logic                        DATA_BUFF_EMPTY,
+    output logic                        DATA_BUFF_RD_EN,
 
-    input  logic  [11:0]     config_dw_number,
 
     //input  logic  [2:0]     TC,
     //input  logic  [2:0]     ATTR,
@@ -70,6 +71,8 @@ module MASTER_BRIDGE
     output logic [31:0] M_PWDATA 
 
 
+
+
     //////////////TRANSMITER///////////// FOR COMPLETION //////////////
 );
 
@@ -77,8 +80,10 @@ wire upper_addr_x = '0;
 //reg [1:0] M_PSEL;
 reg [31:0] M_PRDATA;
 reg        M_PREADY;
-
-
+reg        byte_count;
+reg        fbe_count;
+reg        lbe_count;
+reg        full_dw_count;
 
 
 typedef enum logic [1:0] {IDLE = 0, START, ACCESS} STATE;
@@ -106,13 +111,41 @@ reg [1:0]  GOFFSET;
 reg [7:0]  GBYTE_ENABLE;
 reg [7:0]  GPSTRB;
 
+// AXI INTF
+reg  [ADDR_WIDTH-1:0] AxADDR_COMB;
+reg  [2:0] AxSIZE_COMB;
+reg  [1:0] AxBURST_COMB;
+reg  [7:0] AxLEN_COMB;
+
 always@(*)
 begin
     // M_PWDATA = data;
 end
 
-always@(*)
-begin
+
+always@(*) begin
+    fbe_count = First_DW_BE[3] + First_DW_BE[2] + First_DW_BE[1] + First_DW_BE[0];
+    lbe_count = Last_DW_BE[3] + Last_DW_BE[2] + Last_DW_BE[1] + Last_DW_BE[0];
+    case(length)
+    1: full_dw_count = 0;
+    2: full_dw_count = 0;
+    default: full_dw_count = length - 2;
+    endcase
+    byte_count = fbe_count + lbe_count + (full_dw_count<<2);
+end
+
+
+always@(*) begin
+    AxADDR_COMB[31:0] = lower_addr;
+    AxADDR_COMB [ADDR_WIDTH-1:32] = 0;
+    
+    AxBURST_COMB = 2'b01;
+    AxSIZE_COMB = 0'b011;
+    AxLEN_COMB = (byte_count>>AxSIZE_COMB)-1;
+
+end
+
+always@(*) begin
     case(tlp_type)
     MEM_TLP:
     begin
@@ -130,7 +163,6 @@ begin
         M_PREADY = 0;
     end
     endcase
-
 end
 
 

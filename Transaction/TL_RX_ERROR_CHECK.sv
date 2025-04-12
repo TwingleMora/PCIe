@@ -28,7 +28,7 @@ module TL_RX_ERROR_CHECK #(parameter DATA_WIDTH = 32)
 
     output  logic                       HEADER_DATA, // 0: Header; 1: Data
     output  logic [1:0]                 P_NP_CPL, // Posted: 00; Non-Posted: 01; Completion: 11
-    output  logic [DATA_WIDTH-1:0]      IN_TLP_DW,
+    // output  logic [DATA_WIDTH-1:0]      IN_TLP_DW,
 
     output  logic                       WR_EN,
 
@@ -42,24 +42,15 @@ module TL_RX_ERROR_CHECK #(parameter DATA_WIDTH = 32)
     
     ////////////////////////////////////
 
+    output  logic                       TX_NP_REQ_BUFF_RD_EN,
+    output  logic                       TX_NP_REQ_BUFF_TAG,  //(CPL TAG)
+    input   logic                       EXIST, //<THERE IS REQUEST WITH THE SAME TAG?>
 
 
-    output  logic  [2:0]     tlp_mem_io_msg_cpl_conf,
-    output  logic            tlp_address_32_64,
-    output  logic            tlp_read_write,
-  //output  logic            tlp_conf_type,
+    output  logic                       RX_NP_REG_BUFF_RD_EN,
+    output  logic                       RX_NP_REQ_BUFF_TAG, //(REQ TAG) 
+    input   logic                       RX_NP_REQ_BUFF_STATUS //(REQ TAG) 
 
-    output  logic  [11:0]    cpl_byte_count,
-    output  logic  [6:0]     cpl_lower_address,
-
-    output  logic  [3:0]     first_dw_be,
-    output  logic  [3:0]     last_dw_be,
-
-    output  logic  [31:0]    lower_addr,
-    output  logic  [31:0]    upper_addr,
-
-    output  logic  [31:0]    data,
-    output  logic  [11:0]    config_dw_number
 
 
     
@@ -68,6 +59,25 @@ module TL_RX_ERROR_CHECK #(parameter DATA_WIDTH = 32)
 
 );
 // ====================================================
+
+
+    /* output */  logic  [2:0]     tlp_mem_io_msg_cpl_conf;
+    /* output */  logic            tlp_address_32_64;
+    /* output */  logic            tlp_read_write;
+    //output  logic            tlp_conf_type;
+
+    /* output */  logic  [11:0]    cpl_byte_count;
+    /* output */  logic  [6:0]     cpl_lower_address;
+
+    /* output */  logic  [3:0]     first_dw_be;
+    /* output */  logic  [3:0]     last_dw_be;
+
+    /* output */  logic  [31:0]    lower_addr;
+    /* output */  logic  [31:0]    upper_addr;
+
+    /* output */  logic  [31:0]    data;
+    /* output */  logic  [11:0]    config_dw_number;
+
 
 
 
@@ -392,6 +402,17 @@ TC field, Attr[1:0], and the AT field must all be zero, while the Length field
 //reg           TLP_PREFIX_BLOCKED;
 //reg           ACS_VIOLATION; //(Access Control Services)
 //reg           MC_BLOCKED; //(Mutli-cast)
+
+  ////////     /////////
+ /// BUFFER SIGNALS ///
+////////      ////////
+
+reg [1:0] P_NP_CPL_REG;
+reg  HEADER_DATA_REG;
+
+  ///////////////////////////////////////////////////////////////////////////////
+ ///////////////////////// ERROR FLAGS ////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////
 reg [15:0]      MALFORMED_TLP;
 reg [9:0]       UNSUPPORTED_REQUEST; reg [3:0]   COMPLETER_ABORT;
 
@@ -402,13 +423,29 @@ reg             UNEXPECTED_COMPLETION;
 reg             POISONED_TLP;
 //reg           COMPLETION_TIMEOUT;
 
-reg [3:0]   expected_length;
+
+  ////////////////////////////////////////////////////////////////////////
+ //////////////////////// ERROR DETECTION ///////////////////////////////
+////////////////////////////////////////////////////////////////////////
+
 reg [3:0]   dw_counter;
 reg [3:0]   data_counter;
 
-reg [2:0]   number_of_dws_;
 
+reg [2:0]   number_of_dws_;
 reg         tlp_end;
+reg         data_phase;
+
+reg [3:0]   calc_tlp_dw_count; //
+reg [10:0]  exp;
+
+
+
+  ////////////////////////////////////////////////////////////////////////
+ //////////////////////// ERROR REPORT //////////////////////////////////
+////////////////////////////////////////////////////////////////////////
+
+
 
 always@(*) begin
     case(fmt_[0])
@@ -425,8 +462,9 @@ always@(*) begin
         WR_EN = 0;
         flush = 0;
         commit = 0;
-        if((new_tlp_ready&&valid)) begin // GO TO H0
+        if((new_tlp_ready&&valid)) begin // ITS H0 (IT can be from IDLE or from previous packet)
             
+
             case({fmt_[1],type_[4:3],type_[1]})//fmt[1] write
                 4'b1_00_0, 4'b1_10_0, 4'b1_10_1: //Posted
                 begin
@@ -440,31 +478,62 @@ always@(*) begin
                 begin
                     P_NP_CPL = 2'b11;
                 end
-
             endcase
+            HEADER_DATA = 0;
+            WR_EN = 1;
+
+            if(current!=IDLE) begin
+                if(dw_counter == calc_tlp_dw_count) begin
+                    commit = 1;
+                    flush = 0;
+                end
+                else begin
+                    commit = 0;
+                    flush = 1;
+                end
+
+            end
 
 
         end
-        else if(((current!=IDLE)&&(!valid))||tlp_end) begin
+        else if(((current!=IDLE)&&(!valid))/* ||tlp_end */) begin 
             WR_EN = 0;
+             
+            if(dw_counter == calc_tlp_dw_count) begin
+                commit = 1;
+                flush = 0;
+            end
+            else begin
+                commit = 0;
+                flush = 1;
+            end
+
         end
         else begin
 
         P_NP_CPL = P_NP_CPL_REG;
+        HEADER_DATA = data_phase;
         case(current)
-
+            IDLE: begin //@ IDLE (dw_counter = 0, calc_tlp_dw_count = 0)
+                WR_EN = 0; 
+           
+            end
+            default: begin
+                WR_EN = 1;
+            end
         endcase
-        end
-    
+ 
+        // case(current)
+
+        // endcase
+        end  
 end
-reg [1:0] P_NP_CPL_REG;
-reg  HEADER_DATA_REG;
+
 always@(posedge clk or negedge rst)
 begin
     if(!rst)
     begin
         current <= IDLE;
-        
         ///////////////////////////////////////////////////////
 
 
@@ -480,7 +549,7 @@ begin
         /////////////////////////////////////////////////////
         //****************************************************
         dw_counter <= 0;
-        expected_length <= 0;
+        calc_tlp_dw_count <= 0;
 
         P_NP_CPL_REG <= 0;
         HEADER_DATA_REG <= 0;
@@ -510,225 +579,222 @@ begin
         //DATA
         data_counter <= 0;
         data <= 0;
-        
-
     end
-    else if((new_tlp_ready&&valid)) begin // GO TO H0
-        case(fmt_[0])
-            0: tlp_address_32_64 = 0;
-            1: tlp_address_32_64 = 1;
-        endcase
-        case(fmt_[1])
-            0: tlp_read_write = 0;
-            1: tlp_read_write = 1;
-        endcase
-        case(type_[4:3])
-            REQ: begin
-            case(type_[2:1])
-                MEM:
-                    tlp_mem_io_msg_cpl_conf<= 0;
-                IO:
-                    tlp_mem_io_msg_cpl_conf<= 1;
-                CONF:
-                    tlp_mem_io_msg_cpl_conf<= 4;
-            endcase 
-            end
-            CPL: begin
-                tlp_mem_io_msg_cpl_conf<= 3;
-            end
-            MSG: begin
-                tlp_mem_io_msg_cpl_conf<= 2;
-            end
-        endcase
-
-        case({fmt_[1],type_[4:3],type_[1]})//fmt[1] write
-            4'b1_00_0, 4'b1_10_0, 4'b1_10_1: //Posted
-            begin
-                P_NP_CPL_REG <= 2'b00;
-            end
-            4'b0_00_1, 4'b1_00_1, 4'b0_00_0: //Non Posted
-            begin
-                P_NP_CPL_REG <= 2'b01;    
-            end
-            4'b0_01_1, 4'b1_01_1: //Completion
-            begin
-                P_NP_CPL_REG <= 2'b11;
-            end
-        endcase
-        HEADER_DATA_REG <= 0;
-
-        length <= length_;
-        
-
-        expected_length <= length_ + number_of_dws_;
-        WR_EN <= 1;
-        dw_counter <= 1;
-
-        // commit<=1;
-        // flush<=0;
-
-        current <= H0;
-    end
-    else if((current != IDLE && !valid) || tlp_end) begin //FROM END <TO IDLE . >
-
-        
-        WR_EN <= 0;
-        // flush <= 0;
-        // commit <= 0;
-        dw_counter <= 0;
-        expected_length <= 0;
-
-        
-        P_NP_CPL <= 0;
-        HEADER_DATA <= 0;
-        
-        //It's either @ tlp end or @!valid in non idle state
-        current<= IDLE;
-    end
-    else begin
-        case(current)
-        H0: begin
-            dw_counter <= dw_counter + 1;
+    else
+    begin
+        if(new_tlp_ready&&valid) begin // GO TO H0
+            case(fmt_[0])
+                0: tlp_address_32_64 = 0;
+                1: tlp_address_32_64 = 1;
+            endcase
+            case(fmt_[1])
+                0: tlp_read_write = 0;
+                1: tlp_read_write = 1;
+            endcase
             case(type_[4:3])
                 REQ: begin
-                    first_dw_be <= first_dw_be_;
-                    last_dw_be <= last_dw_be_;
-                    current<=H1_REQ;
+                case(type_[2:1])
+                    MEM:
+                        tlp_mem_io_msg_cpl_conf<= 0;
+                    IO:
+                        tlp_mem_io_msg_cpl_conf<= 1;
+                    CONF:
+                        tlp_mem_io_msg_cpl_conf<= 4;
+                endcase 
                 end
                 CPL: begin
-                    cpl_byte_count <= cpl_byte_count_;
-                    current<=H1_CPL;
+                    tlp_mem_io_msg_cpl_conf<= 3;
                 end
                 MSG: begin
-                   
+                    tlp_mem_io_msg_cpl_conf<= 2;
                 end
             endcase
-        end
 
-        H1_REQ: begin
-            dw_counter <= dw_counter + 1;
-            HEADER_DATA <= 0;
-
-            case(tlp_mem_io_msg_cpl_conf)
-                0,1: begin
-                    case(tlp_address_32_64)
-                    0: begin
-                        lower_addr <= lower_addr_;
-                        current<=H_ADDR32;
-                    end
-                    1: begin
-                        upper_addr <= upper_addr_;
-                        current<=H_ADDR64;
-                    end
-                    endcase
+            case({fmt_[1],type_[4:3],type_[1]})//fmt[1] write
+                4'b1_00_0, 4'b1_10_0, 4'b1_10_1: //Posted
+                begin
+                    P_NP_CPL_REG <= 2'b00;
                 end
-                4: begin
-                    config_dw_number <= config_dw_number_;
-                    current<=H_ID;
+                4'b0_00_1, 4'b1_00_1, 4'b0_00_0: //Non Posted
+                begin
+                    P_NP_CPL_REG <= 2'b01;    
+                end
+                4'b0_01_1, 4'b1_01_1: //Completion
+                begin
+                    P_NP_CPL_REG <= 2'b11;
                 end
             endcase
-            
-        end
+            HEADER_DATA_REG <= 0;
 
-        H_ADDR64: begin
-            dw_counter <= dw_counter + 1;
-
-            lower_addr<=lower_addr_;
-            current <= H_ADDR32;
-        end
-
-        H_ADDR32: begin
+            length <= length_;
             
 
-            //XXX
-            if(tlp_read_write)
-            begin
+            calc_tlp_dw_count <= length_ + number_of_dws_;
+            
+            dw_counter <= 1;
+            data_counter <= 0; //Is that inmportant? yes , what about in IDLE status
+
+            // commit<=1;
+            // flush<=0;
+            current <= H0;
+            end
+            else if((current != IDLE && !valid) /* || tlp_end */) begin //FROM END <TO IDLE . >        
+                
+                // flush <= 0;
+                // commit <= 0;
+                dw_counter <= 0;
+                data_counter <= 0;
+                calc_tlp_dw_count <= 0;
+                // P_NP_CPL <= 0;
+                // HEADER_DATA <= 0;
+                //It's either @ tlp end or @!valid in non idle state
+                current<= IDLE; //only gate to IDLE
+            end
+            else begin
                 dw_counter <= dw_counter + 1;
-                data <= data_;
-                current <= DATA;
-                data_counter <= 1;
+                case(current)
+                    IDLE: begin
+                        //if(new_tlp_ready&&valid)
+                        dw_counter <= 0;
+                    end
+                    H0: begin
+                        // dw_counter <= dw_counter + 1;
+                        case(type_[4:3])
+                            REQ: begin
+                                first_dw_be <= first_dw_be_;
+                                last_dw_be <= last_dw_be_;
+                                current<=H1_REQ;
+                            end
+                            CPL: begin
+                                cpl_byte_count <= cpl_byte_count_;
+                                current<=H1_CPL;
+                            end
+                            MSG: begin
+                                
+                            end
+                        endcase
+                    end
 
-                HEADER_DATA <= 1;
-            end
-            else
-            begin 
-                // ******************************** ******************** ************************ *************************
-                //data_counter <= 0;
-                // current <= IDLE;
-            end
+                    H1_REQ: begin
+                        // dw_counter <= dw_counter + 1;
+                        HEADER_DATA <= 0;
 
+                        case(tlp_mem_io_msg_cpl_conf)
+                            0,1: begin
+                                case(tlp_address_32_64)
+                                0: begin
+                                    lower_addr <= lower_addr_;
+                                    current<=H_ADDR32;
+                                end
+                                1: begin
+                                    upper_addr <= upper_addr_;
+                                    current<=H_ADDR64;
+                                end
+                                endcase
+                            end
+                            4: begin
+                                config_dw_number <= config_dw_number_;
+                                current<=H_ID;
+                            end
+                        endcase
+                        
+                    end
+
+                    H_ADDR64: begin
+                        // dw_counter <= dw_counter + 1;
+                        lower_addr<=lower_addr_;
+                        current <= H_ADDR32;
+                    end
+
+                    H_ADDR32: begin
+                        
+
+                        //XXX
+                        if(tlp_read_write)
+                        begin
+                            // dw_counter <= dw_counter + 1;
+                            data <= data_;
+                            current <= DATA;
+                            data_counter <= 1;
+                            HEADER_DATA <= 1;
+                        end
+                        else
+                        begin 
+                            // ******************************** ******************** ************************ *************************
+                            //data_counter <= 0;
+                            // current <= IDLE;
+                        end
+
+                    end
+                    H_ID: begin
+                        // dw_counter <= dw_counter + 1;
+                        //XXX
+                        if(tlp_read_write)
+                        begin
+                            // dw_counter <= dw_counter + 1;
+                            data <= data_;
+                            current <= DATA;
+                            data_counter <= 1;
+                            HEADER_DATA <= 1;
+                        end
+                        else
+                        begin 
+                            // ******************************** ******************** ************************ *************************
+                            //M_ENABLE <= 1;
+                            //current <= IDLE;
+                        end
+                    end
+
+                    H1_CPL: begin
+                        // dw_counter <= dw_counter + 1;
+                        cpl_byte_count <= cpl_byte_count_;
+                        current <= H2_CPL;
+                    end
+                    //H1_MSG:
+                    H2_CPL: begin
+                        // dw_counter <= dw_counter + 1;
+                        //XXX
+                        cpl_lower_address <= cpl_lower_address_;
+                        if(tlp_read_write) begin
+                            // DATA_BUFFER_WR_EN <= 1;
+                            // dw_counter <= dw_counter + 1;
+                            data <= data_;
+                            current <= DATA;
+                            data_counter <= 1;
+                            HEADER_DATA <= 1;
+                        end
+                        else begin 
+                            // ******************************** ******************** ************************ *************************
+                            // current <= IDLE;
+                        end
+                    end
+                    
+                    DATA: begin
+                        if(data_counter==length)
+                        begin 
+                            // ******************************** ******************** ************************ *************************    
+                        end
+                        else
+                        begin
+                            // dw_counter <= dw_counter + 1;
+                            data <= data_;
+                            data_counter <= data_counter + 1;
+                        end
+                    end
+            endcase
         end
-        H_ID: begin
-            dw_counter <= dw_counter + 1;
-
-            //XXX
-            if(tlp_read_write)
-            begin
-                dw_counter <= dw_counter + 1;
-                data <= data_;
-                current <= DATA;
-                data_counter <= 1;
-
-                HEADER_DATA <= 1;
-            end
-            else
-            begin 
-                // ******************************** ******************** ************************ *************************
-                //M_ENABLE <= 1;
-                //current <= IDLE;
-            end
-        end
-
-        H1_CPL: begin
-            dw_counter <= dw_counter + 1;
-
-            cpl_byte_count <= cpl_byte_count_;
-            current <= H2_CPL;
-        end
-        //H1_MSG:
-        H2_CPL: begin
-            dw_counter <= dw_counter + 1;
-
-            //XXX
-            cpl_lower_address <= cpl_lower_address_;
-            if(tlp_read_write) begin
-                // DATA_BUFFER_WR_EN <= 1;
-                dw_counter <= dw_counter + 1;
-                data <= data_;
-                current <= DATA;
-                data_counter <= 1;
-
-                HEADER_DATA <= 1;
-            end
-            else begin 
-                // ******************************** ******************** ************************ *************************
-                // current <= IDLE;
-            end
-        end
-        
-        DATA: begin
-            if(data_counter==length)
-            begin 
-                // ******************************** ******************** ************************ *************************    
-            end
-            else
-            begin
-                dw_counter <= dw_counter + 1;
-                data <= data_;
-                data_counter <= data_counter + 1;
-            end
-        end
-        endcase
     end
 end
   
 always@(*) begin
     tlp_end = 0;
+    data_phase = 0;
     case(current)
      H_ADDR32: begin
             //XXX
             if(tlp_read_write)
             begin
+                data_phase = 1;
             end
             else
             begin
@@ -741,6 +807,7 @@ always@(*) begin
             //XXX
             if(tlp_read_write)
             begin
+                data_phase = 1;
             end
             else
             begin
@@ -753,6 +820,7 @@ always@(*) begin
         H2_CPL: begin
             //XXX
             if(tlp_read_write) begin
+                data_phase = 1;
             end
             else begin
                  // ******************************** ******************** ************************ *************************
@@ -765,9 +833,11 @@ always@(*) begin
             begin 
                 // ******************************** ******************** ************************ *************************
                 tlp_end =1;
+                data_phase = 0;
             end
             else
             begin
+                data_phase = 1;
             end
         end
     endcase

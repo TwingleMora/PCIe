@@ -40,6 +40,9 @@ output  logic  [1:0]  P_NP_CPL, //22
 output  logic         HEADER_DATA, //23
 output  logic         PNPC_BUFF_WR_EN,//24
 
+output  logic         tlp_start_flag,
+output  logic         tlp_end_flag,
+
 output  logic         fsm_started,
 output  logic         fsm_finished,
 output  logic         data_address,
@@ -67,25 +70,29 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
 
     Mem: 1 ~ 1024
     */
-    reg [31:0] next_TLP;
-    reg [1:0]  next_P_NP_CPL;
-    reg        next_PNPC_BUFF_WR_EN;
-    reg        next_HEADER_DATA;
-    reg        next_CPL_HNDLR_FIFO_RD_EN;
+    reg [31:0]  next_TLP;
+    reg [1:0]   next_P_NP_CPL;
+    reg         next_PNPC_BUFF_WR_EN;
+    reg         next_HEADER_DATA;
+    reg         next_CPL_HNDLR_FIFO_RD_EN;
 
 
-    reg        next_fsm_started;
-    reg        next_fsm_finished;
+    reg         next_fsm_started;
+    reg         next_fsm_finished;
     
-    reg [1:0]  counter,
-               next_counter;
 
-    reg  [1:0] next_data_address;
+    reg         next_tlp_start_flag;
+    reg         next_tlp_end_flag;
 
-    reg [1:0]  last_dw_be;
+    reg [1:0]   counter,
+                next_counter;
 
-    State      current,
-               next; 
+    reg  [1:0]  next_data_address;
+
+    reg [1:0]   last_dw_be;
+
+    State       current,
+                next; 
 
     reg [11:0] length_mult_by_4;
 
@@ -117,11 +124,17 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
         begin
             fsm_started <= 1'b0;
             fsm_finished <= 1'b1;
+
+            tlp_start_flag <= 1'b0;
+            tlp_end_flag <= 1'b0;
         end
         else
         begin
             fsm_started <= next_fsm_started;
             fsm_finished <= next_fsm_finished;
+
+            tlp_start_flag <= next_tlp_start_flag;
+            tlp_end_flag <= next_tlp_end_flag;
         end
     end
     //Completion Buffer
@@ -172,8 +185,8 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
                offset = lower_address[1:0];
                byte_count_gte_dw = |byte_count[11:2];
                byte_count_gt_dw = (|byte_count[11:3]) | (byte_count[2] & |byte_count[1:0]);
-               if(byte_count_gte_dw==0) begin                
-                    case(byte_count[1:0])
+               if(byte_count_gte_dw==0) begin   //less than dw             
+                    case(byte_count[1:0])// b100
                         2'b00:
                             BYTECOUNT_TO_First_DW_BE = 4'b0000;
                         2'b01:
@@ -188,15 +201,15 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
                     BYTECOUNT_TO_First_DW_BE = 4'b1111;
                end
 
-                Length     = (byte_count_sub_one>>2)+1;
+                Length     = (byte_count_sub_one>>2)+1; //(4-1)/3 + 1 = 1
                 
-                length_mult_by_4 = (({2'b00,Length}-12'b1)<<2);
+                length_mult_by_4 = (({2'b00,Length}-12'b1)<<2);//
                 
                 //last_dw_be = ((({2'b00,Length})<<2) - ((byte_count)))&({12{byte_count_gte_dw}});
                 //last_dw_be = ((byte_count-1)>>2 + 1)<<2-byte_count - lower_address[1:0];
                 last_dw_be = byte_count[1:0];
                 
-                case({byte_count_gt_dw, last_dw_be})
+                case({byte_count_gt_dw, last_dw_be})//4
                     4'b000, 3'b001, 3'b010, 3'b011: 
                         BYTECOUNT_TO_Last_DW_BE = 4'b0000;
                     4'b100:
@@ -257,6 +270,9 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
         next_HEADER_DATA = HEADER_DATA;
         next_PNPC_BUFF_WR_EN = PNPC_BUFF_WR_EN;
 
+        
+        next_tlp_start_flag = 1'b0;
+        next_tlp_end_flag = 1'b0;
 
         case(current)
             IDLE:
@@ -274,6 +290,9 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
 
                     next_fsm_started = 1'b1;
                     next_fsm_finished = 1'b0;
+
+                    next_tlp_start_flag = 1'b1;
+                    next_tlp_end_flag = 1'b0;
                 end
             end
             H0:
@@ -344,8 +363,12 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
                 else
                 begin
                     //next_TLP = nothing and next_PNPC_BUFF_WR_EN is not save that nothing TLP
-                    next_PNPC_BUFF_WR_EN = 1'b0;
                     next = FINISH;
+
+                    next_tlp_start_flag = 1'b0;
+                    next_PNPC_BUFF_WR_EN = 1'b0;
+                    next_tlp_end_flag = 1'b1;     //sfr w wa7d hytl3o m3 b3d
+
                 end
             end
 
@@ -384,6 +407,9 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
                     //next_TLP = nothing and next_PNPC_BUFF_WR_EN is not save that nothing TLP
                     next_PNPC_BUFF_WR_EN = 1'b0;
                     next = FINISH;
+
+                    next_tlp_start_flag = 1'b0;
+                    next_tlp_end_flag = 1'b1;
                 end
             end
 
@@ -405,6 +431,9 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
                 //  next_TLP = nothing and next_PNPC_BUFF_WR_EN is not save that nothing TLP
                     next_PNPC_BUFF_WR_EN = 1'b0;
                     next = FINISH;
+
+                    next_tlp_start_flag = 1'b0;
+                    next_tlp_end_flag = 1'b1;
                 end
             end
             DATA: //fmt[1]=1 (wr)
@@ -423,6 +452,9 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
                     //next_TLP = nothing and next_PNPC_BUFF_WR_EN is not save that nothing TLP
                     next_PNPC_BUFF_WR_EN = 1'b0;
                     next = FINISH;
+
+                    next_tlp_start_flag = 1'b0;
+                    next_tlp_end_flag = 1'b1;
                 end
             end
 
