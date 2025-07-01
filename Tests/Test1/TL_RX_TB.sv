@@ -126,8 +126,8 @@ TL_TX TL_TX0
 
             .byte_count(byte_count),                    //input   logic    [11:0]         byte_count,
             .lower_addr(lower_addr),                    //input   logic    [31:0]         lower_addr,
-            .upper_addr(upper_addr),
-                                                        //input   logic    [31:0]         upper_addr,
+            .upper_addr(upper_addr),                    //input   logic    [31:0]         upper_addr,
+                                                        
             .dest_bdf_id(dest_bdf_id),                  //input   logic    [15:0]         dest_bdf_id,
             .config_dw_number(config_dw_number),        //input   logic    [9:0]          config_dw_number,
 

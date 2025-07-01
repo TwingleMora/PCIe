@@ -163,7 +163,7 @@ Arbiter #(.WIDTH(16), .DESC(0)) arbiter
 );
 
 Timer#(.WIDTH(TIMER_WIDTH)) timer 
-(.clk(clk), .rst(rst), .sync_rst(1), .timer(now_time));
+(.clk(clk), .rst(rst), .sync_rst(1'b1), .timer(now_time));
 
 
 

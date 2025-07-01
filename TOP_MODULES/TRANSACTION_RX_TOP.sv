@@ -1,0 +1,438 @@
+// wire new_tlp_ready = TLP_START_BIT_OUT_COMB& ~ALL_BUFFS_EMPTY;
+module TRANSACTION_RX_TOP #(parameter DATA_WIDTH = 32, ADDR_WIDTH = 32 )(
+
+// DL-TL Interface
+input   logic               clk,
+input   logic               rst,
+
+
+//////////////////////////////////////////////////////////////
+// DATA LINK INTERFACE
+//////////////////////////////////////////////////////////////
+input   logic [31:0]        IN_TLP_DW,
+input   logic               new_tlp_ready,
+input   logic               valid_tlp,
+
+
+
+//AXI Interface
+output  logic [ADDR_WIDTH-1:0]          awaddr,
+output  logic [7:0]                     awlen,   // number of transfers in transaction
+output  logic [2:0]                     awsize,  // number of bytes in transfer  //                            000=> 1, 001=>2, 010=>4, 011=>8, 100=>16, 101=>32, 110=>64, 111=>128
+output  logic [1:0]                     awburst,
+input   logic                           awready,
+output  logic                           awvalid,
+
+// W Channel
+output logic [DATA_WIDTH-1:0]           wdata, 
+output logic [(DATA_WIDTH/8)-1:0]       wstrb, 
+output logic                            wlast, 
+output logic                            wvalid,
+input  logic                            wready,
+
+// B Channel
+input  logic [1:0]                      bresp,                         
+input  logic                            bvalid,                         
+output logic                            bready,                         
+
+// AR Channel
+output logic [ADDR_WIDTH-1:0]           araddr,
+output logic [7:0]                      arlen,
+output logic [2:0]                      arsize,
+output logic [1:0]                      arburst,
+input  logic                            arready,
+output                                  arvalid,
+                                        
+
+// R Channel                            
+input   logic [DATA_WIDTH-1:0]          rdata,
+input   logic [1:0]                     rresp,
+input   logic                           rlast,
+input   logic                           rvalid,
+output  logic                           rready,
+
+//Internal Native Interface (FROM AXI MASTER TO TL_TX)
+output  logic                     RX_B_tlp_read_write,          //
+output  logic    [2:0]            RX_B_TC,               //
+output  logic    [2:0]            RX_B_ATTR,             //
+output  logic    [15:0]           RX_B_requester_id,        //
+output  logic    [7:0]            RX_B_tag,              //
+output  logic    [11:0]           RX_B_byte_count,       //
+
+//--------------------------------------------------------------------------------------
+output  logic    [6:0]            RX_B_lower_addr,       //
+output  logic    [2:0]            RX_B_completion_status,
+//----------------------------------------------------------------------------------------- 
+//-----------------------------------------------------------------------------------------          
+output  logic    [31:0]           RX_B_data1,                 //
+output  logic    [31:0]           RX_B_data2,                 //
+output  logic    [31:0]           RX_B_data3,                 //
+//-----------------------------------------------------------------------------------------                   
+output  logic                     RX_B_Wr_En,                  //
+//-----------------------------------------------------------------------------------------
+
+//Internal Native Interface (FROM ERROR DETECTION TO TL_TX)
+//-------------------------------------------------------------------------- (4)
+output   logic    [2:0]            ERR_CPL_TC,                      //.TC(TC);
+output   logic    [2:0]            ERR_CPL_ATTR,                    //.ATTR(ATTR);
+//---------------------------------------------------------------------------(6)
+output   logic    [15:0]           ERR_CPL_requester_id,            //[[X]]  -- //COMPLETER ID 
+output   logic    [7:0]            ERR_CPL_tag,                    //[[X]].
+output   logic    [11:0]           ERR_CPL_byte_count,              //
+
+//---------------------------------------------------------------------------(36)           
+output   logic    [6:0]            ERR_CPL_lower_addr,              //[[X]]
+output   logic    [2:0]            ERR_CPL_completion_status,
+//---------------------------------------------------------------------------(7)  
+//---------------------------------------------------------------------------(96)
+output    logic                     ERR_CPL_Wr_En                 //.valid(valid);
+//---------------------------------------------------------------------------(1)
+
+);
+
+
+/* input */  logic                     RX_HEADER_DATA; // 0: Header; 1: Data
+/* input */  logic [1:0]               RX_P_NP_CPL; // Posted: 00; Non-Posted: 01; Completion: 11
+/* input */  logic [DATA_WIDTH-1:0]    RX_IN_TLP_DW;
+/* input */  logic                     RX_WR_EN;
+/* input */  logic                     RX_RD_EN;
+/* input */  logic                     RX_commit;
+/* input */  logic                     RX_flush;
+/* output */ wire                      RX_EMPTY;
+/* output */ logic                     RX_OUT_EMPTY;
+/* output */ logic [DATA_WIDTH-1:0]    RX_OUT_TLP_DW;      
+/* output */ logic [DATA_WIDTH-1:0]    RX_OUT_TLP_DW_COMB; 
+
+//----------------------------------------------------------------
+// DATA FIFO
+//----------------------------------------------------------------
+
+logic [DATA_WIDTH-1:0]          DATA_BUFF_COMB_DATA_OUT;
+/*input*/   logic               last_dw;
+/*input*/   logic               DATA_BUFF_EMPTY;
+/*output*/  logic               DATA_BUFF_RD_EN;
+
+//------------------------------------------------------------------
+// Requests CPL from RX AXI MASTER
+//------------------------------------------------------------------
+    //      .    .    .    .                        
+    //    //.\\//.\\//.\\//.\\ CPLD FROM RX BRIDGE  
+
+
+
+
+
+
+TL_RX_ERROR_CHECK #(.DATA_WIDTH(32)) tl_rx_error_check
+(
+    /* input   logic */ .clk(clk),
+    /* input   logic */ .rst(rst),
+
+///////////FROM DL///////////////////////
+    /* input  logic   [31:0] */   .TLP(IN_TLP_DW),
+    /* input  logic */            .new_tlp_ready(new_tlp_ready), 
+    /* input  logic */            .valid(valid_tlp),
+///////////P_NP_CPL BUFFER////////////////////
+//Write (H||D)(), Read (H)
+
+    // input   logic                          TLP_BUFFER_EMPTY(),
+    /* output  logic */                       .HEADER_DATA(RX_HEADER_DATA), // 0: Header; 1: Data
+    /* output  logic [1:0] */                 .P_NP_CPL(RX_P_NP_CPL), // Posted: 00; Non-Posted: 01; Completion: 11
+    // /* output  logic [DATA_WIDTH-1:0] */      .IN_TLP_DW(RX_IN_TLP_DW),
+    /* output  logic */                       .WR_EN(RX_WR_EN),
+    /* output  logic */                       .flush(RX_flush),
+    /* output  logic */                       .commit(RX_commit)
+    // output  logic                       TLP_BUFFER_RD_EN(), //Not Busy
+    ////////////////////////////////////
+    // output  logic                       DATA_BUFFER_WR_EN(),          
+    ////////////////////////////////////
+    // /* output  logic  [2:0] */     .tlp_mem_io_msg_cpl_conf(),
+    // /* output  logic */            .tlp_address_32_64(),
+    // /* output  logic */            .tlp_read_write(),
+    //  //output  logic               tlp_conf_type(),
+    // /* output  logic  [11:0] */    .cpl_byte_count(),
+    // /* output  logic  [6:0] */     .cpl_lower_address(),
+    // /* output  logic  [3:0] */     .first_dw_be(),
+    // /* output  logic  [3:0] */     .last_dw_be(),
+    // /* output  logic  [31:0] */    .lower_addr(),
+    // /* output  logic  [31:0] */    .upper_addr(),
+    // /* output  logic  [31:0] */    .data(),
+    // /* output  logic  [11:0] */    .config_dw_number()
+);
+
+TX_NP_REQ_BUFF #(.TIMEOUT(50_000),.PERIOD(10), .DATA_WIDTH(32), .MEMORY_DEPTH(16)) tx_np_req_buff
+(
+/* input   logic */          .clk(clk),
+/* input   logic */          .rst(rst),
+
+/* input   logic */          .WR_EN(),
+/* input   logic */          .RD_EN(),
+
+//SEL
+/* input   logic   [7:0] */  .TAG(),
+
+/* input   logic   [7:0] */  .DEST(),
+// input   logic  [14:0]  START_TIME,
+// input   logic          EXIST
+
+/* output  logic */          .EXIST(),
+
+
+
+/* output  logic */          .EMPTY(),
+
+/* output  logic */          .FULL(),
+
+/* output  logic    [31:0] */ .OUT()
+
+);
+
+
+RX_PNPC_BUFF #(.DATA_WIDTH(32)) PNPC_BUFF0
+(
+    .clk(clk),                            //input  logic                     clk,
+    .rst(rst),                            //input  logic                     rst,
+    .HEADER_DATA(RX_HEADER_DATA),            //input  logic                     HEADER_DATA, // 0: Header, 1: Data
+    .P_NP_CPL(RX_P_NP_CPL),                  //input  logic [1:0]               P_NP_CPL, // Posted: 00, Non-Posted: 01, Completion: 11
+    .IN_TLP_DW(OUT_TLP_DW),                //input  logic [DATA_WIDTH-1:0]    IN_TLP_DW
+    .WR_EN(RX_WR_EN),              //input  logic                     WrEn,
+    .RD_EN(RX_RD_EN),                        //input  logic                     RdEn,
+    .commit(RX_commit),
+    .flush(RX_flush),
+    .EMPTY(RX_ALL_BUFFS_EMPTY),
+    .OUT_TLP_DW(),               //output logic [DATA_WIDTH-1:0]    OUT_TLP_DW     
+    .OUT_TLP_DW_COMB(RX_OUT_TLP_DW)      
+);
+
+TL_RX_DECODER tl_rx_decoder
+(
+    .clk(clk),
+    .rst(rst),
+    
+    .TLP(RX_OUT_TLP_DW),// input  logic   [31:0]   TLP,
+    .TLP_BUFFER_EMPTY(RX_ALL_BUFFS_EMPTY),// input  logic            TLP_BUFFER_EMPTY,
+    .TLP_BUFFER_RD_EN(RX_RD_EN),// output logic            TLP_BUFFER_RD_EN,
+    
+    
+    .DATA_BUFFER_WR_EN(DATA_BUFFER_WR_EN),// output logic            DATA_BUFFER_WR_EN,          
+    
+
+
+    .tlp_mem_io_msg_cpl_conf(rx_tlp_mem_io_msg_cpl_conf),// output  logic  [2:0]     tlp_mem_io_msg_cpl_conf,
+    .tlp_address_32_64(rx_tlp_address_32_64),// output  logic            tlp_address_32_64,
+    .tlp_read_write(rx_tlp_read_write),// output  logic            tlp_read_write,
+    // //output  logic            tlp_conf_type,
+
+    .cpl_byte_count(rx_cpl_byte_count),// output  logic  [11:0]    cpl_byte_count,
+    .cpl_lower_address(rx_cpl_lower_address),// output  logic  [6:0]     cpl_lower_address,
+
+    .first_dw_be(rx_first_dw_be),  // output  logic  [3:0]     first_dw_be,
+    .last_dw_be(rx_last_dw_be),    // output  logic  [3:0]     last_dw_be,
+    .requester_id(rx_requester_id),
+    .tag(rx_tag),
+
+    .lower_addr(rx_lower_addr),            // output  logic  [31:0]    lower_addr,
+    .upper_addr(rx_upper_addr),            // output  logic  [31:0]    upper_addr,
+    .tlp_length (rx_tlp_length),
+    .config_dw_number(rx_config_dw_number),// output  logic  [11:0]    config_dw_number,
+
+    .data(rx_data),                        // output  logic  [31:0]    data,
+
+
+
+
+
+    // Interface With Master
+    .M_READY(M_READY), // input  logic            M_READY
+    .M_ENABLE(M_ENABLE)// output logic            M_ENABLE,
+
+);
+
+
+
+
+
+
+FIFO DATA_BUFFER
+(
+    .clk            (clk),//input  logic        clk, 
+    .rst            (rst),//input  logic        rst,
+    .WrEn           (DATA_BUFFER_WR_EN),//input  logic        DATA_BUFF_WR_EN, 
+    .RdEn           (DATA_BUFF_RD_EN),//input  logic        DATA_BUFF_RD_EN,
+    .DataIn         (rx_data),//input  logic [DATA_WIDTH-1:0] DATA_BUFF_DATA_IN,
+    // .DataOut        (),//output logic [DATA_WIDTH-1:0] DATA_BUFF_DATA_OUT,
+    .comb_DataOut   (DATA_BUFF_COMB_DATA_OUT), //output logic [DATA_WIDTH-1:0] DATA_BUFF_COMB_DATA_OUT
+    .Full           (),//output logic        DATA_BUFF_Full, 
+    .Empty          (DATA_BUFF_EMPTY),//output logic        DATA_BUFF_Empty 
+    .AlmostEmpty    (last_dw)
+); 
+
+
+
+
+
+
+
+/* 
+    MASTER_BRIDGE master_bridge
+    (
+        .PCLK(clk),     //     input logic         PCLK,
+        .PRESETn(rst),  //     input logic         PRESETn,
+
+
+
+        
+        // //SLAVE Interface (APB-Like Interface FROM Transaction )
+
+        .PENABLE(M_ENABLE), //     input   logic           PENABLE,
+        .PREADY(M_READY),   //     output  logic           PREADY,
+        
+        .tlp_mem_io_msg_cpl_conf(rx_tlp_mem_io_msg_cpl_conf),   //     input  logic  [2:0]     tlp_mem_io_msg_cpl_conf,
+        .tlp_address_32_64(rx_tlp_address_32_64),               //     input  logic            tlp_address_32_64,
+        .tlp_read_write(rx_tlp_read_write),                     //     input  logic            tlp_read_write,
+
+            
+        .first_dw_be(rx_first_dw_be),   //     input  logic  [3:0]     first_dw_be,
+        .last_dw_be(rx_last_dw_be),     //     input  logic  [3:0]     last_dw_be,
+        .lower_addr(rx_lower_addr),     //     input  logic  [31:0]    lower_addr,
+
+        // //calculate OFFSET and M_PSTRB
+
+        .data(DATA_BUFF_COMB_DATA_OUT), //     input  logic  [31:0]    data,
+        .last_dw(last_dw),              //     input  logic            last_dw,
+
+        .DATA_BUFF_EMPTY(DATA_BUFF_EMPTY),  //     input logic            DATA_BUFF_EMPTY,
+        .DATA_BUFF_RD_EN(DATA_BUFF_RD_EN),                 //     output logic            DATA_BUFF_RD_EN,
+
+        .config_dw_number(rx_config_dw_number),//     input  logic  [9:0]     config_dw_number,
+
+
+        // // Master Interface (TO APPLICATION & CONF MEMORY)
+
+        .M_PRDATA1(M_PRDATA1),  //     input  logic [31:0] M_PRDATA1,
+        .M_PRDATA2(),           //     input  logic [31:0] M_PRDATA2,
+
+        .M_PREADY1(M_PREADY1),  //     input  logic        M_PREADY1,
+        .M_PREADY2(),           //     input  logic        M_PREADY2,
+        
+
+        .M_PSEL1(M_PSEL1),      //     output logic        M_PSEL1,
+        .M_PSEL2(),             //     output logic        M_PSEL2,
+
+        .M_PADDR(M_PADDR),      //     output logic [31:0] M_PADDR,
+        .M_PENABLE(M_PENABLE),  //     output logic        M_PENABLE,
+        .M_PWRITE(M_PWRITE),    //     output logic        M_PWRITE,
+        .M_PSTRB(M_PSTRB),      //     output logic [3:0]  M_PSTRB,
+        .M_PWDATA(M_PWDATA)     //     output logic [31:0] M_PWDATA 
+
+
+        ////////////// TRANSMITER ///////////// FOR COMPLETION //////////////
+    ); 
+*/
+
+/* 
+    APB_ALU #(
+    .RO_START(),           // parameter [31:0] RO_START =     'b11_11,
+    .RO_END(),             // parameter [31:0] RO_END   =     'b00_00,
+    .MEMORY_DEPTH(3)       // parameter        MEMORY_DEPTH =  3 
+    )core_layer (
+    .PCLK(clk),// input  logic PCLK, 
+    .PRESETn(rst),// input  logic PRESETn,
+    // //APB INTERFACE
+    .PSEL(M_PSEL1),    // input  logic        PSEL, 
+    .PENABLE(M_PENABLE), // input  logic        PENABLE,
+    .PWRITE(M_PWRITE),  // input  logic        PWRITE,
+    .PADDR(M_PADDR),   // input  logic [31:0] PADDR,
+    .PSTRB(M_PSTRB),   // input  logic [3:0]  PSTRB,
+    .PWDATA(M_PWDATA),  // input  logic [31:0] PWDATA,
+    .PREADY(M_PREADY1),  // output logic        PREADY,
+    .PRDATA(M_PRDATA1)  // output logic [31:0] PRDATA,
+    );
+*/
+
+AXI_MASTER #(.ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)) axi_master
+(   
+// Global Signals 
+/* input logic */         .aclk(clk),
+/* input logic */         .aresetn(rst),
+                          .VALID(M_ENABLE),
+                          .ACK(M_READY),
+
+            .tlp_mem_io_msg_cpl_conf(rx_tlp_mem_io_msg_cpl_conf),   //     input  logic  [2:0]     tlp_mem_io_msg_cpl_conf,
+            .tlp_address_32_64(rx_tlp_address_32_64),               //     input  logic            tlp_address_32_64,      
+            .tlp_read_write(rx_tlp_read_write),                     //     input  logic            tlp_read_write,          
+
+/* input  logic  [15:0] */ .requester_id(rx_requester_id),
+/* input  logic  [7:0]  */ .tag(rx_tag),       
+            .first_dw_be(rx_first_dw_be),   //     input  logic  [3:0]     first_dw_be,
+            .last_dw_be(rx_last_dw_be),     //     input  logic  [3:0]     last_dw_be,
+            .lower_addr(rx_lower_addr),     //     input  logic  [31:0]    lower_addr,
+
+            // //calculate OFFSET and M_PSTRB
+            .length(rx_tlp_length),
+            .data(DATA_BUFF_COMB_DATA_OUT),        //     input  logic  [31:0]    data,
+            .last_dw(last_dw),                     //     input  logic            last_dw,
+
+            .DATA_BUFF_EMPTY(DATA_BUFF_EMPTY),     //     input logic            DATA_BUFF_EMPTY,
+            .DATA_BUFF_RD_EN(DATA_BUFF_RD_EN),     //     output logic            DATA_BUFF_RD_EN,
+
+            .config_dw_number(rx_config_dw_number),//     input  logic  [9:0]     config_dw_number,
+                
+
+
+    // AW Channel
+    /* output logic [ADDR_WIDTH-1:0] */           .awaddr(awaddr),
+    /* output logic [7:0] */                      .awlen(awlen),  // number of transfers in transaction
+    /* output logic [2:0] */                      .awsize(awsize),  // number of bytes in transfer  //                            000=> 1, 001=>2, 010=>4, 011=>8, 100=>16, 101=>32, 110=>64, 111=>128
+    /* output logic [1:0] */                      .awburst(awburst),
+    /* input  logic */                            .awready(awready),
+    /* output logic */                            .awvalid(awvalid),
+
+    // W Channel
+    /* output logic [DATA_WIDTH-1:0] */           .wdata(wdata), 
+    /* output logic [(DATA_WIDTH/8)-1:0] */       .wstrb(wstrb), 
+    /* output logic */                            .wlast(wlast), 
+    /* output logic */                            .wvalid(wvalid),
+    /* input  logic */                            .wready(wready),
+
+    // B Channel
+    /* input  logic [1:0] */                      .bresp(bresp),                         
+    /* input  logic */                            .bvalid(bvalid),                         
+    /* output logic */                            .bready(bready),                         
+
+    // AR Channel
+    /* output logic [ADDR_WIDTH-1:0] */           .araddr(araddr),
+    /* output logic [7:0] */                      .arlen(arlen),
+    /* output logic [2:0] */                      .arsize(arsize),
+    /* output logic [1:0] */                      .arburst(arburst),
+    /* input  logic */                            .arready(arready),
+    /* output logic */                            .arvalid(arvalid),
+                                            
+
+    // R Channel                            
+    /* input  logic [DATA_WIDTH-1:0] */           .rdata(rdata),
+    /* input  logic [1:0] */                      .rresp(rresp),
+    /* input  logic */                            .rlast(rlast),
+    /* input  logic */                            .rvalid(rvalid),
+    /* output logic */                            .rready(rready),
+    // ----------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+            .RX_B_tlp_read_write(RX_B_tlp_read_write),
+            .RX_B_TC(RX_B_TC),
+            .RX_B_ATTR(RX_B_ATTR),
+            .RX_B_tag(RX_B_tag),
+            .RX_B_requester_id(RX_B_requester_id),
+            .RX_B_byte_count(RX_B_byte_count),
+            .RX_B_lower_addr(RX_B_lower_addr),
+            .RX_B_completion_status(RX_B_completion_status),
+    //-----------------------------------------------------------------------------------------           
+    /* input   logic    [31:0] */ .RX_B_data1(RX_B_data1),                 //
+    /* input   logic    [31:0] */ .RX_B_data2(RX_B_data2),                 //
+    /* input   logic    [31:0] */ .RX_B_data3(RX_B_data3),                 //
+//-----------------------------------------------------------------------------------------                   
+    /* input   logic           */ .RX_B_Wr_En(RX_B_Wr_En)                  //
+//-----------------------------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+);
+endmodule

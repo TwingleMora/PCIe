@@ -1,4 +1,4 @@
-module APP_TL_TX_BRIDGE
+module APP_TL_TX_BRIDGE2
 (
     input  logic            clk, rst,
     input  logic            DPI_MM,  //DPI = 0, MM = 1

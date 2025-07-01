@@ -200,7 +200,8 @@ localparam MEM = 'b00, IO = 'b01, CONF = 'b10;
 //Completion For What??
 
 
-
+//Counter the TLP and check it has the same length as it should
+// If Write (fmt[1]=1) we must check data count also if Read(fmt[1]=0) we must not check data 
 
 // Link Flow Control Related Errors
 /*
@@ -397,15 +398,15 @@ TC field, Attr[1:0], and the AT field must all be zero, while the Length field
 // 
 //reg [2:0] counter;
 
-//reg           ECRC_FAILURE;
-//reg           ATOMIC_EGRESS_BLOCKED;
-//reg           TLP_PREFIX_BLOCKED;
-//reg           ACS_VIOLATION; //(Access Control Services)
-//reg           MC_BLOCKED; //(Mutli-cast)
+//reg                   ECRC_FAILURE;
+//reg                   ATOMIC_EGRESS_BLOCKED;
+//reg                   TLP_PREFIX_BLOCKED;
+//reg                   ACS_VIOLATION; //(Access Control Services)
+//reg                   MC_BLOCKED; //(Mutli-cast)
 
-  ////////     /////////
+  ////////  x   ////////
  /// BUFFER SIGNALS ///
-////////      ////////
+////////   x   ///////
 
 reg [1:0] P_NP_CPL_REG;
 reg  HEADER_DATA_REG;
@@ -448,7 +449,7 @@ reg [10:0]  exp;
 
 
 always@(*) begin
-    case(fmt_[0])
+    case(fmt_[0])//Addr64 / 32
     0: number_of_dws_ = 3;
     1: number_of_dws_ = 4;
     endcase
@@ -483,7 +484,7 @@ always@(*) begin
             WR_EN = 1;
 
             if(current!=IDLE) begin
-                if(dw_counter == calc_tlp_dw_count) begin
+                if(dw_counter == calc_tlp_dw_count) begin //
                     commit = 1;
                     flush = 0;
                 end
@@ -628,9 +629,17 @@ begin
 
             length <= length_;
             
+            case(fmt_[1])
+                0: //READ
+                begin
+                    calc_tlp_dw_count <= /* length_ +  */number_of_dws_;
+                end
+                1:
+                begin
+                    calc_tlp_dw_count <= length_ + number_of_dws_;
 
-            calc_tlp_dw_count <= length_ + number_of_dws_;
-            
+                end
+            endcase
             dw_counter <= 1;
             data_counter <= 0; //Is that inmportant? yes , what about in IDLE status
 

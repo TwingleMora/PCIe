@@ -2,8 +2,8 @@
 // SIZE is problem.
 module Arbiter #(parameter WIDTH = 16, parameter DESC = 1) 
 (
- input   logic [WIDTH-1:0] IN,
- output  logic [WIDTH-1:0] OUT
+    input   logic [WIDTH-1:0] IN,
+    output  logic [WIDTH-1:0] OUT
 );
 
    

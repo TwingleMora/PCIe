@@ -12,14 +12,21 @@ module TL_RX_DECODER
 
     output  logic  [2:0]     tlp_mem_io_msg_cpl_conf,
     output  logic            tlp_address_32_64,
-    output  logic            tlp_read_write,
+    output  logic            tlp_read_write, //CPL - CPLD
+
+
+
     //output  logic            tlp_conf_type,
 
     output  logic  [11:0]    cpl_byte_count,
     output  logic  [6:0]     cpl_lower_address,
+    output  logic  [15:0]    requester_id,
+    output  logic  [7:0]     tag,
 
     output  logic  [3:0]     first_dw_be,
     output  logic  [3:0]     last_dw_be,
+
+    output  logic  [9:0]     tlp_length,
 
     output  logic  [31:0]    lower_addr,
     output  logic  [31:0]    upper_addr,
@@ -41,7 +48,7 @@ typedef enum reg [3:0] {IDLE=0, START, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1
 
 
 State current;
-reg [9:0] length;
+// reg [9:0] tlp_length;
 reg [2:0] counter;
 
 //H0
@@ -50,6 +57,8 @@ wire  [4:0] type_;
 wire  [9:0] length_;
 
 //REQ
+wire  [15:0]    requester_id_;
+wire  [7:0]     tag_;
 wire  [3:0]     first_dw_be_;
 wire  [3:0]     last_dw_be_;
 
@@ -75,6 +84,8 @@ assign first_dw_be_ = TLP[3:0];
 assign last_dw_be_ = TLP[7:4];
 
 //MEM, IO
+assign requester_id_ = TLP[31:16];
+assign tag_ = TLP[15:8];
 assign lower_addr_ = {TLP[31:2],2'b00};
 assign upper_addr_ =  TLP[31:0];
 //CONF
@@ -105,11 +116,13 @@ begin
         tlp_mem_io_msg_cpl_conf <= 0;
         tlp_address_32_64 <= 0;
         tlp_read_write <= 0;
-        length<=0;
+        tlp_length<=0;
         
         //REQ
-        first_dw_be <= 0;
-        last_dw_be <= 0;
+        requester_id <= 0;
+        tag<=0;
+        first_dw_be  <= 0;
+        last_dw_be   <= 0;
 
         //MEM, IO
         lower_addr <= 0;
@@ -142,12 +155,12 @@ begin
         end
         START: begin
             case(fmt_[0])
-                0: tlp_address_32_64 = 0;
-                1: tlp_address_32_64 = 1;
+                0: tlp_address_32_64 <= 0;
+                1: tlp_address_32_64 <= 1;
             endcase
             case(fmt_[1])
-                0: tlp_read_write = 0;
-                1: tlp_read_write = 1;
+                0: tlp_read_write <= 0;
+                1: tlp_read_write <= 1;
             endcase
             case(type_[4:3])
                 REQ: begin
@@ -167,12 +180,14 @@ begin
                     tlp_mem_io_msg_cpl_conf<= 2;
                 end
             endcase
-            length <= length_;
+            tlp_length <= length_;
             current<=H0;
         end
         H0: begin
             case(type_[4:3])
                 REQ: begin
+                    requester_id <= requester_id_;
+                    tag <= tag_;
                     first_dw_be <= first_dw_be_;
                     last_dw_be <= last_dw_be_;
                     current<=H1_REQ;
@@ -276,7 +291,7 @@ begin
         
         DATA: begin
             
-            if(counter==length)
+            if(counter==tlp_length)
             begin
                 // TLP_BUFFER_RD_EN <= 0;
                 // DATA_BUFFER_WR_EN <= 0;
@@ -317,7 +332,7 @@ end
                     end
                 end
                 DATA: begin      
-                    if(counter==length-1) begin
+                    if(counter==tlp_length-1) begin
                         TLP_BUFFER_RD_EN <= 0;
                     end
                     else begin
@@ -326,7 +341,7 @@ end
                 end
                 H_ADDR32, H2_CPL, H_ID: begin
                     if(tlp_read_write) begin
-                        if(length == 1) begin
+                        if(tlp_length == 1) begin
                             TLP_BUFFER_RD_EN <= 0;
                         end
                         else begin
@@ -361,7 +376,7 @@ end
                     end
                 end
                 DATA: begin
-                    if(counter==length)
+                    if(counter==tlp_length)
                     begin
                         // TLP_BUFFER_RD_EN <= 0;
                         DATA_BUFFER_WR_EN <= 0;
@@ -375,7 +390,7 @@ end
                 H_ADDR32, H2_CPL, H_ID: begin
                     if(tlp_read_write) begin
                         DATA_BUFFER_WR_EN <= 1;
-                        // if(length == 1) begin
+                        // if(tlp_length == 1) begin
                         //     TLP_BUFFER_RD_EN <= 0;
                         // end
                         // else begin

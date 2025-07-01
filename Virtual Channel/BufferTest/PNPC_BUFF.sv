@@ -1,4 +1,4 @@
-module PNPC_BUFF
+module PNPC_BUFF //TL_TX_MAL / TL_RX_TB 1 & 2 / TL_TX(_TB) / AXI_TX_RX_TB / 
 #(parameter DATA_WIDTH = 32)
 (
 input   logic                       clk,
