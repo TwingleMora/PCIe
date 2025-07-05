@@ -1,6 +1,6 @@
 //B => Bridge
 //COMPLETION is 3DW
-module DOUBLE_IN_CPL_ARB#(parameter DATA_WIDTH = 128 )
+module DOUBLE_IN_CPL_ARB#(parameter DATA_WIDTH = 128, parameter DATA_WIDTH2 = 32 )
 (
     input clk,
     input rst,
@@ -58,18 +58,30 @@ module DOUBLE_IN_CPL_ARB#(parameter DATA_WIDTH = 128 )
            
            // Do I need Address Here?? No 
            input   logic    [2:0]               RX_B_completion_status,
-           input   logic    [6:0]               RX_B_lower_addr,       //.lower_addr(lower_addr),      
+           input   logic    [6:0]               RX_B_lower_addr,       //.lower_addr(lower_addr),     
+
+//-----------------------------------------------------------------------------------------           
 //-----------------------------------------------------------------------------------------           
            input   logic    [DATA_WIDTH-1:0]    RX_B_data,
+  
+     //////////////////////////////////////////////////////////////
+    //////////////////////////TX_FIFO/////////////////////////////
+           input   logic    [DATA_WIDTH2-1:0]    RX_B_TX_DATA_FIFO_data,
+           input   logic                         RX_B_TX_DATA_FIFO_WR_EN,
+  //////////////////////////////////////////////////////////////
+   
+           input   logic                        RX_B_Wr_En,                  //.valid(valid),
+//-----------------------------------------------------------------------------------------           
 //-----------------------------------------------------------------------------------------           
            
        //  input   logic                   RX_B_valid                   //.valid(valid),
-           input   logic                        RX_B_Wr_En,                  //.valid(valid),
 //-----------------------------------------------------------------------------------------
+
+
 
     /// FROM BRIDGE
 
-
+ 
     //
 
 
@@ -77,7 +89,7 @@ module DOUBLE_IN_CPL_ARB#(parameter DATA_WIDTH = 128 )
     ////////////////////////////////////////////////////////////////////
     ///////////////////////////////////////////////////////////////////
     output  logic                           VALID,   /////////////////
-    input   logic                           ACK,    /////////////////
+                                                    /////////////////
                                                    //////////////////
     /////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////
@@ -98,7 +110,17 @@ module DOUBLE_IN_CPL_ARB#(parameter DATA_WIDTH = 128 )
            output   logic    [2:0]              X_completion_status,
            output   logic    [6:0]              X_lower_addr,              //[[X]]       //.lower_addr(lower_addr),
 //-----------------------------------------------------------------------------(10) 
-           output   logic    [DATA_WIDTH-1:0]   X_data                   //.data1(data1),
+           output   logic    [DATA_WIDTH-1:0]   X_data,                   //.data1(data1),
+
+      //////////////////////////////////////////////////////////////
+     //////////////////////////////////////////////////////////////
+    //////////////////////////TX_FIFO/////////////////////////////
+   //////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////
+           input   logic                        X_TX_FIFO_RD_EN,
+           input   logic                        X_ACK,
+           output  logic    [DATA_WIDTH2-1:0]   X_data2                   //.data1(data1),
+
 );
 // Address: 32bit,
 // Data: 96 ~ 128 bit
@@ -154,6 +176,14 @@ module DOUBLE_IN_CPL_ARB#(parameter DATA_WIDTH = 128 )
 //---------------------------------------------------------------------------(7)
         // Do I need Address Here?? No 
            logic    [DATA_WIDTH-1:0]    RX_B_data_out;                 //.data1(data1),                                 //input   logic    [31:0]         data1,
+           
+        //////////////////////////////////////////////////////////////
+        /////////////////////////////FIFO TX/////////////////////////
+        //////////////////////////////////////////////////////////////
+           logic    [DATA_WIDTH2-1:0]    RX_B_data_out2;                 //.data1(data1),                                 //input   logic    [31:0]         data1,
+        //////////////////////////////////////////////////////////////
+        //////////////////////////////////////////////////////////////
+                
 //---------------------------------------------------------------------------(96)
 
 
@@ -166,6 +196,22 @@ module DOUBLE_IN_CPL_ARB#(parameter DATA_WIDTH = 128 )
 
 // WIDTH = 55-0 + 1 = 56
 */
+      //////////////////////////////////////////////////////////////
+     //////////////////////////////////////////////////////////////
+    //////////////////////////TX_FIFO/////////////////////////////
+   //////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////
+           logic                     ERR_ACK;
+
+      //////////////////////////////////////////////////////////////
+     //////////////////////////////////////////////////////////////
+    //////////////////////////TX_FIFO/////////////////////////////
+   //////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////
+           logic                     RX_TX_FIFO_RD_EN;
+
+           logic                     RX_ACK;
+
 
 
 
@@ -187,7 +233,7 @@ FIFO_D #(.DEPTH(32), .DATA_WIDTH(57)) ERROR_CONTROL_BUFF
 /* input  logic                     */ .clk(clk), 
 /* input  logic                     */ .rst(rst),
 /* input  logic                     */ .WrEn(ERR_CPL_Wr_En), 
-/* input  logic                     */ .RdEn(),
+/* input  logic                     */ .RdEn(ERR_ACK),
 /* input  logic [DATA_WIDTH-1:0]    */ .DataIn(ERROR_CONTROL_SIGNALS),
 /* output logic [DATA_WIDTH-1:0]    */ .DataOut(),
 /* output logic [DATA_WIDTH-1:0]    */ .comb_DataOut(ERROR_CONTROL_BUFF_OUT),
@@ -245,7 +291,7 @@ FIFO_D #(.DEPTH(32), .DATA_WIDTH(57)) RX_BRIDGE_CONTROL_BUFF
 /* input  logic                     */ .clk(clk), 
 /* input  logic                     */ .rst(rst),
 /* input  logic                     */ .WrEn(RX_B_Wr_En), 
-/* input  logic                     */ .RdEn(RX_BRIDGE_BUFF_RD_EN),
+/* input  logic                     */ .RdEn(RX_ACK),
 /* input  logic [DATA_WIDTH-1:0]    */ .DataIn(RX_BRIDGE_CONTROL_SIGNALS),
 /* output logic [DATA_WIDTH-1:0]    */ .DataOut(),
 /* output logic [DATA_WIDTH-1:0]    */ .comb_DataOut(RX_BRIDGE_CONTROL_SIGNALS_OUT),
@@ -257,29 +303,47 @@ FIFO_D #(.DEPTH(32), .DATA_WIDTH(57)) RX_BRIDGE_CONTROL_BUFF
 
 wire [DATA_WIDTH-1:0] RX_BRIDGE_DATA_BUSES = {RX_B_data};
 wire [DATA_WIDTH-1:0] RX_BRIDGE_DATA_BUFF_OUT;
+wire [DATA_WIDTH2-1:0] RX_BRIDGE_DATA_BUFF_OUT2;
 
 assign {RX_B_data_out} = RX_BRIDGE_DATA_BUFF_OUT;
+assign RX_B_data_out2 = RX_BRIDGE_DATA_BUFF_OUT2;
 
 wire RX_BRIDGE_DATA_BUFF_EMPTY;
 wire RX_BRIDGE_DATA_BUFF_VALID = ~ RX_BRIDGE_DATA_BUFF_EMPTY;
 
 
-FIFO_D #(.DEPTH(32), .DATA_WIDTH(DATA_WIDTH)) RX_BRIDGE_DATA_BUFF
+// FIFO_D #(.DEPTH(32), .DATA_WIDTH(DATA_WIDTH)) RX_BRIDGE_DATA_BUFF
+// (
+// /* input  logic                     */ .clk(clk), 
+// /* input  logic                     */ .rst(rst),
+// /* input  logic                     */ .WrEn(RX_B_Wr_En), 
+// /* input  logic                     */ .RdEn(RX_TX_FIFO_RD_EN),
+// /* input  logic [DATA_WIDTH-1:0]    */ .DataIn(RX_BRIDGE_DATA_BUSES),
+// /* output logic [DATA_WIDTH-1:0]    */ .DataOut(),
+// /* output logic [DATA_WIDTH-1:0]    */ .comb_DataOut(RX_BRIDGE_DATA_BUFF_OUT),
+// /* output logic                     */ .Full(), 
+// /* output logic                     */ .Empty(RX_BRIDGE_DATA_BUFF_EMPTY),
+// /* output logic                     */ .AlmostEmpty(),
+// /* output logic                     */ .AlmostFull()
+// );
+
+FIFO_D #(.DEPTH(32), .DATA_WIDTH(DATA_WIDTH2)) RX_BRIDGE_DATA_BUFF2
 (
 /* input  logic                     */ .clk(clk), 
 /* input  logic                     */ .rst(rst),
-/* input  logic                     */ .WrEn(RX_B_Wr_En), 
-/* input  logic                     */ .RdEn(RX_BRIDGE_BUFF_RD_EN),
-/* input  logic [DATA_WIDTH-1:0]    */ .DataIn(RX_BRIDGE_DATA_BUSES),
+/* input  logic                     */ .WrEn(RX_B_TX_DATA_FIFO_WR_EN), 
+/* input  logic [DATA_WIDTH-1:0]    */ .DataIn(RX_B_TX_DATA_FIFO_data),
 /* output logic [DATA_WIDTH-1:0]    */ .DataOut(),
-/* output logic [DATA_WIDTH-1:0]    */ .comb_DataOut(RX_BRIDGE_DATA_BUFF_OUT),
+/* input  logic                     */ .RdEn(RX_TX_FIFO_RD_EN),
+/* output logic [DATA_WIDTH-1:0]    */ .comb_DataOut(RX_BRIDGE_DATA_BUFF_OUT2),
 /* output logic                     */ .Full(), 
 /* output logic                     */ .Empty(RX_BRIDGE_DATA_BUFF_EMPTY),
 /* output logic                     */ .AlmostEmpty(),
 /* output logic                     */ .AlmostFull()
 );
 
-wire RX_BRIDGE_BUFF_REQ = (RX_BRIDGE_DATA_BUFF_VALID && RX_BRIDGE_CONTROL_BUFF_VALID);
+
+wire RX_BRIDGE_BUFF_REQ = (RX_BRIDGE_DATA_BUFF_VALID && RX_BRIDGE_CONTROL_BUFF_VALID); //I think data must exist
 wire ERROR_BUFF_REQ     = (/* ERROR_DATA_BUFF_VALID &&  */ERROR_CONTROL_BUFF_VALID);
  
 wire RX_BRIDGE_BUFF_GRANT;
@@ -294,8 +358,8 @@ Arbiter #(.WIDTH(2), .DESC(1)) CPL_ARBITER
  /* output  logic [WIDTH-1:0] */  .OUT(grants)
 );
 
-assign ERROR_BUFF_RD_EN = ERROR_BUFF_GRANT && ACK;
-assign RX_BRIDGE_BUFF_RD_EN = RX_BRIDGE_BUFF_GRANT && ACK;
+// assign ERROR_BUFF_RD_EN = ERROR_BUFF_GRANT && ACK;
+// assign RX_BRIDGE_BUFF_RD_EN = RX_BRIDGE_BUFF_GRANT && ACK;
 
 assign VALID = ERROR_BUFF_GRANT || RX_BRIDGE_BUFF_GRANT;
 
@@ -323,7 +387,29 @@ begin
         // /* output   logic    [31:0] */         X_data1 = 0/* RX_B_data1 */;                 //.data1(data1),
         // /* output   logic    [31:0] */         X_data2 = 0/* RX_B_data2 */;                 //.data2(data2),
         // /* output   logic    [31:0] */         X_data3 = 0/* RX_B_data3 */;                 //.data3(data3), 
+                                               
+
+              ////////////////////////////////////////////////////////////
                                                X_data = 0;
+              ////////////////////////////////////////////////////////////
+             /////////////////////////FIFO TX//////////////////////////
+            //////////////////////////////////////////////////////////
+                                                RX_ACK = 0;
+                                                RX_TX_FIFO_RD_EN = 0;
+            //////////////////////////////////////////////////////////
+
+              ////////////////////////////////////////////////////////////
+             /////////////////////////FIFO TX//////////////////////////
+            //////////////////////////////////////////////////////////
+                                                ERR_ACK = 0;
+            //////////////////////////////////////////////////////////
+            
+
+              ////////////////////////////////////////////////////////////
+             /////////////////////////FIFO TX//////////////////////////
+            //////////////////////////////////////////////////////////    
+                                                X_data2 = 0; 
+            //////////////////////////////////////////////////////////    
     case(grants)
     ERROR_BUFF:
     begin
@@ -343,6 +429,13 @@ begin
 //---------------------------------------------------------------------------(36)           
 
         /* output   logic    [6:0] */          X_lower_addr = ERR_CPL_lower_addr_out;              //[[X]]       //.lower_addr(lower_addr),  
+                                               
+             ////////////////////////////////////////////////////////////
+            /////////////////////////FIFO TX//////////////////////////
+            //////////////////////////////////////////////////////////
+                                               ERR_ACK      = X_ACK;
+            //////////////////////////////////////////////////////////
+            //////////////////////////////////////////////////////////
     end
     
     RX_BRIDGE_BUFF:
@@ -367,7 +460,18 @@ begin
         // /* output   logic    [31:0] */         X_data1 = RX_B_data1_out;                 //.data1(data1),
         // /* output   logic    [31:0] */         X_data2 = RX_B_data2_out;                 //.data2(data2),
         // /* output   logic    [31:0] */         X_data3 = RX_B_data3_out;                 //.data3(data3),  
-                                                X_data = RX_B_data_out;
+                                                X_data      = RX_B_data_out;
+
+            ////////////////////////////////////////////////////////////
+            /////////////////////////FIFO TX//////////////////////////
+            //////////////////////////////////////////////////////////
+                                                RX_ACK             = X_ACK;
+                                               
+                                                X_data2            = RX_B_data_out2;
+                                                RX_TX_FIFO_RD_EN   = X_TX_FIFO_RD_EN;
+            //////////////////////////////////////////////////////////
+            //////////////////////////////////////////////////////////
+
     end
     default:
     begin
@@ -392,6 +496,19 @@ begin
         // /* output   logic    [31:0] */         X_data2 = 0/* RX_B_data2 */;                 //.data2(data2),
         // /* output   logic    [31:0] */         X_data3 = 0/* RX_B_data3 */;                 //.data3(data3), 
                                                 X_data = 0;
+
+            ////////////////////////////////////////////////////////////
+            /////////////////////////FIFO TX//////////////////////////
+            //////////////////////////////////////////////////////////
+                                                RX_ACK = 0;
+                                                RX_TX_FIFO_RD_EN = 0;
+            //////////////////////////////////////////////////////////
+
+            ////////////////////////////////////////////////////////////
+            /////////////////////////FIFO TX//////////////////////////
+            //////////////////////////////////////////////////////////
+                                                ERR_ACK = 0;
+            //////////////////////////////////////////////////////////
     end
     endcase
 

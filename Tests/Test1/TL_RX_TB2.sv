@@ -2,6 +2,7 @@ module TL_RX_TB2;
 localparam UPGRADED_DATA_WIDTH = 128;
 localparam DATA_WIDTH = 32;
 localparam ADDR_WIDTH = 32;
+localparam BUS_WIDTH = 128;
 //FIRST CLK, RST
 bit                     clk, rst;
 // SECOND NAMES
@@ -31,18 +32,22 @@ logic  [31:0]           data2;
 logic  [31:0]           data3;
 
 
+logic  [31:0]          x_data;
+logic                  x_wren;
+
+
 logic  [9:0]            config_dw_number;
 
 logic  [2:0]            completion_status;
 logic  [7:0]            message_code;
 
-logic                   valid;
-logic                   RD_EN;
-wire                    VALID_FOR_DL;
-wire                    ALL_BUFFS_EMPTY;
-logic   [31:0]          OUT_TLP_DW;    
-logic                   fsm_finished;
-logic                   TL_TX_ACK;
+logic                          valid;
+logic                          RD_EN;
+wire                           VALID_FOR_DL;
+wire                           ALL_BUFFS_EMPTY;
+logic   [BUS_WIDTH-1:0]          OUT_TLP_DW;    
+logic                          fsm_finished;
+logic                          TL_TX_ACK;
 //-----------------------------------------
 
 //TL_RX_DECODER <== RX_PNPC_BUFF
@@ -158,6 +163,7 @@ logic                   TL_TX_ACK;
 
 
 
+
 // ---------------------------------------------------------------------------
 // 
 // ---------------------------------------------------------------------------
@@ -191,12 +197,61 @@ logic                   TL_TX_ACK;
 /* input */   logic    [31:0]                       req_data2;
 /* input */   logic    [31:0]                       req_data3;
 
+//////////////////////////////////////////////////////////////////
+///////////////////////////FIFO TX////////////////////////////////
+//////////////////////////////////////////////////////////////////
+/* input */     logic    [DATA_WIDTH-1:0]             REQ_data;
+/* input */     logic    [ADDR_WIDTH-1:0]             REQ_addr;
+
+                logic                                 REQ_rd_wr;
+                logic                                 REQ_valid;
+
+/* input */     logic                                 REQ_WR_EN;
+//////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////
+
 /* input */   logic    [9:0]                        req_config_dw_number;
 /* input */   logic    [2:0]                        req_completion_status;
 /* input */   logic    [7:0]                        req_message_code;
 /* input */   logic                                 req_valid;
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
+
+    /* input */   logic [ADDR_WIDTH-1:0]           req_awaddr;  
+    /* input */   logic [7:0]                      req_awlen;   // number of transfers in transaction
+    /* input */   logic [2:0]                      req_awsize;  // number of bytes in transfer // 000=> 1; 001=>2; 010=>4; 011=>8; 100=>16; 101=>32; 110=>64; 111=>128
+    /* input */   logic [1:0]                      req_awburst;  
+    /* output */  logic                            req_awready; 
+    /* input */   logic                            req_awvalid; 
+
+    // W Channelreq_
+    /* input */   logic [DATA_WIDTH-1:0]           req_wdata; 
+    /* input */   logic [(DATA_WIDTH/8)-1:0]       req_wstrb; 
+    /* input */   logic                            req_wlast; 
+    /* input */   logic                            req_wvalid;
+    /* output */  logic                            req_wready;
+
+    // B Channelreq_
+    /* output */  logic [1:0]                      req_bresp;                         
+    /* output */  logic                            req_bvalid;                         
+    /* input */   logic                            req_bready;                         
+
+    // AR Channelreq_
+    /* input */   logic [ADDR_WIDTH-1:0]           req_araddr;
+    /* input */   logic [7:0]                      req_arlen;
+    /* input */   logic [2:0]                      req_arsize;
+    /* input */   logic [1:0]                      req_arburst;
+    /* output */  logic                            req_arready;
+    /* input */   logic                            req_arvalid;
+                                            
+
+    // R Channel                            req_
+    /* output */  logic [DATA_WIDTH-1:0]           req_rdata;
+    /* output */  logic [1:0]                      req_rresp;
+    /* output */  logic                            req_rlast;
+    /* output */  logic                            req_rvalid;
+    /* input */   logic                            req_rready;
+
 
 /////////////////////////////////////////////////////////////////////////////\\\---|
 //////////////////////////////////////////////////////////////////////////////\\\  |
@@ -253,6 +308,15 @@ logic                   TL_TX_ACK;
               /* input */   logic    [31:0]           RX_B_data3;                 //
 //-----------------------------------------------------------------------------------------                   
               /* input */   logic                     RX_B_Wr_En;                  //
+
+     //////////////////////////////////////////////////////////////
+    //////////////////////////TX_FIFO/////////////////////////////
+           /* input */   logic    [31:0]               RX_B_TX_DATA_FIFO_data;
+           /* input */   logic                         RX_B_TX_DATA_FIFO_WR_EN;
+  //////////////////////////////////////////////////////////////
+   
+
+
 //-----------------------------------------------------------------------------------------
 
 
@@ -273,6 +337,14 @@ logic                   TL_TX_ACK;
               /* output */   logic    [31:0]           CPL_data1;                 //.data1(data1);
               /* output */   logic    [31:0]           CPL_data2;                 //.data2(data2);
               /* output */   logic    [31:0]           CPL_data3;                 //.data3(data3) ;  
+//////////////////////////////////////////////////////////////////
+///////////////////////////FIFO TX////////////////////////////////
+//////////////////////////////////////////////////////////////////
+              /* input */    logic    [31:0]           CPL_data;
+              /* input */    logic                     CPL_WR_EN;
+
+//////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////
 
     //////////////////////////////////////////////////////////////////////////////////////////////
    /* input */   logic                             CPL_ARB_ACK;      ////////////////////////////
@@ -283,7 +355,14 @@ logic                   TL_TX_ACK;
 
 
 // ---------------------------------------------------------------------------
+// -----------------------------CPL TIMEOUT----------------------------------
 // ---------------------------------------------------------------------------
+    /* input  */   logic                            NP_RDEN     ;
+    /* input  */   logic  [7:0]                     NP_TAG_IDX  ;
+    /* input  */   logic  [15:0]                    NP_DEST_IDX ;
+    /* output */   logic                            NP_REQ_EXIST;   
+
+
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
@@ -296,6 +375,56 @@ logic TLP_END_BIT_OUT_COMB;
 always #5 clk = ~clk;
 
 wire [31:0] dumb_signal2;
+
+
+APP_AXI_MASTER app_axi_master
+(
+
+    /* input  logic  [DATA_WIDTH-1:0] */            .i_data (REQ_data),    //data bus                        
+    /* input  logic  [DATA_WIDTH-1:0] */            .i_addr (REQ_addr),    //address bus                            
+    /* input  logic */                              .i_rd_wr(REQ_rd_wr), 
+    /* input  logic */                              .i_valid(REQ_valid),   //control bus
+    /* output logic */                              .o_ack  (),         
+        // Global Signals 
+    /* input logic */                              .aclk(clk),
+    /* input logic */                              .aresetn(rst),
+
+    // AW Channel
+    /* input   logic [ADDR_WIDTH-1:0] */           .awaddr  (req_awaddr),  
+    // /* input   logic [7:0] */                      .awlen   (req_awlen),   // number of transfers in transaction
+    // /* input   logic [2:0] */                      .awsize  (req_awsize),  // number of bytes in transfer // 000=> 1, 001=>2, 010=>4, 011=>8, 100=>16, 101=>32, 110=>64, 111=>128
+    // /* input   logic [1:0] */                      .awburst (req_awburst),  
+    /* output  logic */                            .awready (req_awready), 
+    /* input   logic */                            .awvalid (req_awvalid), 
+
+    // W Channel
+    /* input   logic [DATA_WIDTH-1:0] */           .wdata   (req_wdata), 
+    /* input   logic [(DATA_WIDTH/8)-1:0] */       .wstrb   (req_wstrb), 
+    // /* input   logic */                            .wlast   (req_wlast), 
+    /* input   logic */                            .wvalid  (req_wvalid),
+    /* output  logic */                            .wready  (req_wready),
+
+    // B Channel
+    /* output  logic [1:0] */                      .bresp   (req_bresp),                           
+    /* output  logic */                            .bvalid  (req_bvalid),                         
+    /* input   logic */                            .bready  (req_bready),                          
+
+    // AR Channel
+    /* input   logic [ADDR_WIDTH-1:0] */           .araddr  (req_araddr),
+    // /* input   logic [7:0] */                      .arlen   (req_arlen),
+    // /* input   logic [2:0] */                      .arsize  (req_arsize),
+    // /* input   logic [1:0] */                      .arburst (req_arburst),
+    /* output  logic */                            .arready (req_arready),
+    /* input   logic */                            .arvalid (req_arvalid),
+                                            
+
+    // R Channel                            
+    /* output  logic [DATA_WIDTH-1:0] */           .rdata   (req_rdata),
+    /* output  logic [1:0] */                      .rresp   (req_rresp),
+    // /* output  logic */                            .rlast   (req_rlast),
+    /* output  logic */                            .rvalid  (req_rvalid),
+    /* input   logic */                            .rready  (req_rready)
+);
 
 TRANSACTION_TX_TOP  tl_tx_top(
 /* inpinut  logic */                        .clk(clk),
@@ -325,29 +454,79 @@ TRANSACTION_TX_TOP  tl_tx_top(
         //\\\\\\\\\\\\\\\\\\\\\\\\\\\|//////////////////////////////\\
 
 //FROM RX MASTER to TX MASTER
-/* input    logic */    /* [2:0] */            .CPL_tlp_mem_io_msg_cpl(CPL_tlp_mem_io_msg_cpl),   //tlp_mem_io_msg_cpl_conf(tlp_mem_io_msg_cpl_conf)(),
-/* input    logic */                           .CPL_tlp_address_32_64(CPL_tlp_address_32_64),    //fmt[0]      //tlp_address_32_64(tlp_address_32_64)(),
-/* input    logic */                           .CPL_tlp_read_write(CPL_tlp_read_write),       //fmt[1]      // tlp_read_write(tlp_read_write)(),
+
+
+
+
+//------------------------------------------------------------------------------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------------------------------------------------------------------------
+//                             DOUBLE_IN_CPL_ARB            
+//------------------------------------------------------------------------------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------------------------------------------------------------------------
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//------------------------------------------------------------------
+// Errors CPL from Error Detection Block
+//------------------------------------------------------------------
 //-------------------------------------------------------------------------- (4)
-/* input    logic */    /* [2:0] */            .CPL_TC(CPL_TC),                      //TC(TC)(), 
-/* input    logic */    /* [2:0] */            .CPL_ATTR(CPL_ATTR),                    //ATTR(ATTR)(), 
-//---------------------------------------------------------------------------(6)
-/* input    logic */    /* [15:0] */           .CPL_requester_id(CPL_requester_id),            //[[CPL]]  -- //COMPLETER ID //device_id(device_id)(),
-/* input    logic */    /* [7:0] */            .CPL_tag(CPL_tag),                     //[[CPL]]tag(tag)(),
-/* input    logic */    /* [11:0] */           .CPL_byte_count(CPL_byte_count),              //byte_count(byte_count)(),
+              /* input   logic    [2:0] */            .ERR_CPL_TC(ERR_CPL_TC),                      //.TC(TC);
+              /* input   logic    [2:0] */            .ERR_CPL_ATTR(ERR_CPL_ATTR),                    //.ATTR(ATTR);
+//----------------------------------------------------.-----------------------(6)
+              /* input   logic    [15:0] */           .ERR_CPL_requester_id(ERR_CPL_requester_id),            //[[X]]  -- //COMPLETER ID 
+              /* input   logic    [7:0] */            .ERR_CPL_tag(ERR_CPL_tag),                     //[[X]].
+              /* input   logic    [11:0] */           .ERR_CPL_byte_count(ERR_CPL_byte_count),              //
+
 //---------------------------------------------------------------------------(36)           
-/* input    logic */    /* [6:0] */            .CPL_lower_addr(CPL_lower_addr),              //[[CPL]]       //lower_addr(lower_addr)(),
-/* input    logic */    /* [2:0] */            .CPL_completion_status(CPL_completion_status),
-//---------------------------------------------------------------------------(7)
-/* input    logic */    /* [31:0] */           .CPL_data1(CPL_data1),                 //data1(data1)(),
-/* input    logic */    /* [31:0] */           .CPL_data2(CPL_data2),                 //data2(data2)(),
-/* input    logic */    /* [31:0] */           .CPL_data3(CPL_data3),                 //data3(data3) (),  
+              /* input   logic    [6:0] */            .ERR_CPL_lower_addr(ERR_CPL_lower_addr),              //[[X]]
+              /* input   logic    [2:0] */            .ERR_CPL_completion_status(ERR_CPL_completion_status),
+//---------------------------------------------------------------------------(7)  
+//---------------------------------------------------------------------------(96)
+             /* input    logic */                     .ERR_CPL_Wr_En(ERR_CPL_Wr_En),    //FOR CONTROL             //.valid(valid);
+//---------------------------------------------------------------------------(1)
 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////
-/* input    logic */                           .CPL_ARB_VALID(CPL_ARB_VALID), //////////////////////////
-/* output   logic  */                          .CPL_ARB_ACK(CPL_ARB_ACK),    //////////////////////////
-///////////////////////////////////////////////////////////////////////////////////////////////////////
 
+
+//------------------------------------------------------------------
+// Requests CPL from RX AXI MASTER to TX NATIVE SLAVE
+//------------------------------------------------------------------
+    //      .    .    .    .                        
+    //    //.\\//.\\//.\\//.\\ CPLD FROM RX BRIDGE  
+              /* input   logic */                     .RX_B_tlp_read_write(RX_B_tlp_read_write),          //
+              /* input   logic [2:0] */               .RX_B_TC(RX_B_TC),               //
+              /* input   logic [2:0] */               .RX_B_ATTR(RX_B_ATTR),             //
+              /* input   logic [15:0] */              .RX_B_requester_id(RX_B_requester_id),        //
+              /* input   logic [7:0] */               .RX_B_tag(RX_B_tag),              //
+              /* input   logic [11:0] */              .RX_B_byte_count(RX_B_byte_count),       //
+
+//--------------------------------------------------------------------------------------
+              /* input   logic    [6:0] */            .RX_B_lower_addr(RX_B_lower_addr),        //
+              /* input   logic    [2:0] */            .RX_B_completion_status(RX_B_completion_status),
+//----------------------------------------------------------------------------------------- 
+//-----------------------------------------------------------------------------------------          
+              /* input   logic    [31:0] */           .RX_B_data1(),                 //
+              /* input   logic    [31:0] */           .RX_B_data2(),                 //
+              /* input   logic    [31:0] */           .RX_B_data3(),                 //
+//-----------------------------------------------------------------------------------------                   
+              /* input   logic */                     .RX_B_Wr_En(RX_B_Wr_En),                  //
+
+     /////////////////////////////////////////////////////////////////////////////
+    //////////////////////////TX_FIFO////////////////////////////////////////////
+        /* input   logic    [DATA_WIDTH2-1:0] */     .RX_B_TX_DATA_FIFO_data(RX_B_TX_DATA_FIFO_data),
+        /* input   logic */                          .RX_B_TX_DATA_FIFO_WR_EN(RX_B_TX_DATA_FIFO_WR_EN),
+  /////////////////////////////////////////////////////////////////////////////
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//------------------------------------------------------------------------------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------------------------------------------------------------------------
+//                         >>>>>>>>>>>>        DOUBLE_IN_CPL_ARB        <<<<<<<<<<<<<
+//------------------------------------------------------------------------------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 
 
@@ -355,19 +534,19 @@ TRANSACTION_TX_TOP  tl_tx_top(
 /* input    logic */                     .MSG_tlp_address_32_64(),       //fmt[0]      //tlp_address_32_64(tlp_address_32_64)(),
 /* input    logic */                     .MSG_tlp_read_write(),          //fmt[1]      // tlp_read_write(tlp_read_write)(),
 //-------------------------------------------------------------------------- (4)
-/* input    logic */    /* [2:0] */            .MSG_TC(),                      //TC(TC)(), 
-/* input    logic */    /* [2:0] */            .MSG_ATTR(),                    //ATTR(ATTR)(), 
-//---------------------------------------------------------------------------(6)
-/* input    logic */    /* [15:0] */           .MSG_requester_id(),            //[[MSG]]  -- //COMPLETER ID //device_id(device_id)(),
-/* input    logic */    /* [7:0] */            .MSG_tag(),                     //[[MSG]]tag(tag)(),
-/* input    logic */    /* [11:0] */           .MSG_byte_count(),              //byte_count(byte_count)(),
-//---------------------------------------------------------------------------(36)           
-/* input    logic */    /* [6:0] */            .MSG_lower_addr(),              //[[MSG]]       //lower_addr(lower_addr)(),
-/* input    logic */    /* [2:0] */            .MSG_completion_status(),
-//---------------------------------------------------------------------------(7)
-/* input    logic */    /* [31:0] */           .MSG_data1(),                 //data1(data1)(),
-/* input    logic */    /* [31:0] */           .MSG_data2(),                 //data2(data2)(),
-/* input    logic */    /* [31:0] */           .MSG_data3(),                 //data3(data3) (),  
+/* input    logic */    /* [2:0] */      .MSG_TC(),                      //TC(TC)(), 
+/* input    logic */    /* [2:0] */      .MSG_ATTR(),                    //ATTR(ATTR)(), 
+//---------------------------------------------------------------------(6)
+/* input    logic */    /* [15:0] */     .MSG_requester_id(),            //[[MSG]]  -- //COMPLETER ID //device_id(device_id)(),
+/* input    logic */    /* [7:0] */      .MSG_tag(),                     //[[MSG]]tag(tag)(),
+/* input    logic */    /* [11:0] */     .MSG_byte_count(),              //byte_count(byte_count)(),
+//---------------------------------------------------------------------(36)           
+/* input    logic */    /* [6:0] */      .MSG_lower_addr(),              //[[MSG]]       //lower_addr(lower_addr)(),
+/* input    logic */    /* [2:0] */      .MSG_completion_status(),
+//---------------------------------------------------------------------(7)
+/* input    logic */    /* [31:0] */     .MSG_data1(),                 //data1(data1)(),
+/* input    logic */    /* [31:0] */     .MSG_data2(),                 //data2(data2)(),
+/* input    logic */    /* [31:0] */     .MSG_data3(),                 //data3(data3) (),  
 /////////////////////////////////////////////////////////////////////////////////////////////
 /* input    logic */                     .MSG_ARB_VALID(),           ////////////////////////////////
 /* output   logic */                     .MSG_ARB_ACK(),             ////////////////////////////////
@@ -375,195 +554,94 @@ TRANSACTION_TX_TOP  tl_tx_top(
 
 
 
-// ---------------------------------------------------------------------------
-// AXI
-// ---------------------------------------------------------------------------
-/* input    logic */    /* [2:0] */                        .REQ_tlp_mem_io_msg_cpl_conf(req_tlp_mem_io_msg_cpl_conf),
-/* input    logic */                                       .REQ_tlp_address_32_64(req_tlp_address_32_64),
-/* input    logic */                                       .REQ_tlp_read_write(req_tlp_read_write),
-/* input    logic */    /* [2:0] */                        .REQ_TC(req_TC),
-/* input    logic */    /* [2:0] */                        .REQ_ATTR(req_ATTR),
-/* input    logic */    /* [15:0] */                       .REQ_requester_id(req_requester_id),
-/* input    logic */    /* [7:0] */                        .REQ_tag(req_tag),
-/* input    logic */    /* [11:0] */                       .REQ_byte_count(req_byte_count),
-/* input    logic */    /* [31:0] */                       .REQ_lower_addr(req_lower_addr),
-/* input    logic */    /* [31:0] */                       .REQ_upper_addr(req_upper_addr),
-/* input    logic */    /* [15:0] */                       .REQ_dest_bdf_id(req_dest_bdf_id),
-// /* input */   logic    [UPGRADED_DATA_WIDTH-1:0]    REQ_data(),
-/* input    logic */    /* [31:0] */                       .REQ_data1(req_data1),
-/* input    logic */    /* [31:0] */                       .REQ_data2(req_data2),
-/* input    logic */    /* [31:0] */                       .REQ_data3(req_data3),
+// // ---------------------------------------------------------------------------
+// // AXI
+// // ---------------------------------------------------------------------------
+// /* input    logic */    /* [2:0] */                        .REQ_tlp_mem_io_msg_cpl_conf(req_tlp_mem_io_msg_cpl_conf),
+// /* input    logic */                                       .REQ_tlp_address_32_64(req_tlp_address_32_64),
+// /* input    logic */                                       .REQ_tlp_read_write(req_tlp_read_write),
+// /* input    logic */    /* [2:0] */                        .REQ_TC(req_TC),
+// /* input    logic */    /* [2:0] */                        .REQ_ATTR(req_ATTR),
+// /* input    logic */    /* [15:0] */                       .REQ_requester_id(req_requester_id),
+// /* input    logic */    /* [7:0] */                        .REQ_tag(req_tag),
+// /* input    logic */    /* [11:0] */                       .REQ_byte_count(req_byte_count),
+// /* input    logic */    /* [31:0] */                       .REQ_lower_addr(req_lower_addr),
+// /* input    logic */    /* [31:0] */                       .REQ_upper_addr(req_upper_addr),
+// /* input    logic */    /* [15:0] */                       .REQ_dest_bdf_id(req_dest_bdf_id),
+// // /* input */   logic    [UPGRADED_DATA_WIDTH-1:0]    REQ_data(),
+// /* input    logic */    /* [31:0] */                       .REQ_data1(req_data1),
+// /* input    logic */    /* [31:0] */                       .REQ_data2(req_data2),
+// /* input    logic */    /* [31:0] */                       .REQ_data3(req_data3),
 
-/* input    logic */    /* [9:0] */                        .REQ_config_dw_number (req_config_dw_number),
-/* input    logic */    /* [2:0] */                        .REQ_completion_status(req_completion_status),
-/* input    logic */    /* [7:0] */                        .REQ_message_code(req_message_code),
-/* input    logic */                                       .REQ_valid(req_valid)
+// //////////////////////////////////////////////////////////////////
+// ///////////////////////////FIFO TX////////////////////////////////
+// //////////////////////////////////////////////////////////////////
+// /* input    logic    [31:0] */                              .REQ_data (REQ_data),
+// /* input    logic */                                        .REQ_WR_EN(REQ_WR_EN),
+// //////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////
+
+
+// /* input    logic */    /* [9:0] */                        .REQ_config_dw_number (req_config_dw_number),
+// /* input    logic */    /* [2:0] */                        .REQ_completion_status(req_completion_status),
+// /* input    logic */    /* [7:0] */                        .REQ_message_code(req_message_code),
+// /* input    logic */                                       .REQ_valid(req_valid)
+// // ---------------------------------------------------------------------------
+// // ---------------------------------------------------------------------------
+
+    // AR Channel
+                                            
+
+    // R Channel                            
+
+
+
+    // AW Channel
+    /* input   logic [ADDR_WIDTH-1:0] */           .awaddr  (req_awaddr),  
+    /* input   logic [7:0] */                      .awlen   (req_awlen),   // number of transfers in transaction
+    /* input   logic [2:0] */                      .awsize  (req_awsize),  // number of bytes in transfer // 000=> 1, 001=>2, 010=>4, 011=>8, 100=>16, 101=>32, 110=>64, 111=>128
+    /* input   logic [1:0] */                      .awburst (req_awburst),  
+    /* output  logic */                            .awready (req_awready), 
+    /* input   logic */                            .awvalid (req_awvalid), 
+
+    // W Channel
+    /* input   logic [DATA_WIDTH-1:0] */           .wdata   (req_wdata), 
+    /* input   logic [(DATA_WIDTH/8)-1:0] */       .wstrb   (req_wstrb), 
+    /* input   logic */                            .wlast   (req_wlast), 
+    /* input   logic */                            .wvalid  (req_wvalid),
+    /* output  logic */                            .wready  (req_wready),
+
+    // B Channel
+    /* output  logic [1:0] */                      .bresp   (req_bresp),                           
+    /* output  logic */                            .bvalid  (req_bvalid),                         
+    /* input   logic */                            .bready  (req_bready),                          
+
+    // AR Channel
+    /* input   logic [ADDR_WIDTH-1:0] */           .araddr  (req_araddr),
+    /* input   logic [7:0] */                      .arlen   (req_arlen),
+    /* input   logic [2:0] */                      .arsize  (req_arsize),
+    /* input   logic [1:0] */                      .arburst (req_arburst),
+    /* output  logic */                            .arready (req_arready),
+    /* input   logic */                            .arvalid (req_arvalid),
+                                            
+
+    // R Channel                            
+    /* output  logic [DATA_WIDTH-1:0] */           .rdata   (req_rdata),
+    /* output  logic [1:0] */                      .rresp   (req_rresp),
+    /* output  logic */                            .rlast   (req_rlast),
+    /* output  logic */                            .rvalid  (req_rvalid),
+    /* input   logic */                            .rready  (req_rready),
+
+    // ---------------------------------------------------------------------------
+// -----------------------------CPL TIMEOUT----------------------------------
 // ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
+    /* input    logic         */                      .NP_RDEN     (NP_RDEN),
+    /* input    logic  [7:0]  */                      .NP_TAG_IDX  (NP_TAG_IDX),
+    /* input    logic  [15:0] */                      .NP_DEST_IDX (NP_DEST_IDX),
+    /* output   logic         */                      .NP_REQ_EXIST(NP_REQ_EXIST)   
 );
 
-// TX_TRIPLE_IN_ARB #(.DATA_WIDTH(128)) tx_triple_in_arb
 
-// (
-// /* input   logic    [2:0]               */.cpl_tlp_mem_io_msg_cpl_conf(CPL_tlp_mem_io_msg_cpl),
-// /* input   logic                        */.cpl_tlp_address_32_64(CPL_tlp_address_32_64),
-// /* input   logic                        */.cpl_tlp_read_write(CPL_tlp_read_write),
-// /* input   logic    [2:0]               */.cpl_TC(CPL_TC),
-// /* input   logic    [2:0]               */.cpl_ATTR(CPL_ATTR),
-// /* input   logic    [15:0]              */.cpl_requester_id(CPL_requester_id),
-// /* input   logic    [7:0]               */.cpl_tag(CPL_tag),
-// /* input   logic    [11:0]              */.cpl_byte_count(CPL_byte_count),
-// /* input   logic    [31:0]              */.cpl_lower_addr(CPL_lower_addr),
-// /* input   logic    [31:0]              */.cpl_upper_addr(cpl_upper_addr),
-// /* input   logic    [15:0]              */.cpl_dest_bdf_id(cpl_dest_bdf_id),
-
-// // input   logic    [31:0]         cpl_data1(),
-// // input   logic    [31:0]         cpl_data2(),
-// // input   logic    [31:0]         cpl_data3(),
-
-// /* input   logic   [DATA_WIDTH-1:0]     */.cpl_data({32'h0, CPL_data3, CPL_data2, CPL_data1}),
-
-// /* input   logic    [9:0]               */.cpl_config_dw_number(cpl_config_dw_number),
-
-// /* input   logic    [2:0]               */.cpl_completion_status(CPL_completion_status),
-// /* input   logic    [7:0]               */.cpl_message_code(),
-// /* input   logic                        */.cpl_valid(CPL_ARB_VALID),
-// /* output  logic                        */.CPL_ARB_ACK(CPL_ARB_ACK),
-// //-------------------------------------------------------------
-
-
-// //MSG_INTF
-// /* input   logic    [2:0]               */.msg_tlp_mem_io_msg_cpl_conf(),
-// /* input   logic                        */.msg_tlp_address_32_64(),
-// /* input   logic                        */.msg_tlp_read_write(),
-// /* input   logic    [2:0]               */.msg_TC(),
-// /* input   logic    [2:0]               */.msg_ATTR(),
-// /* input   logic    [15:0]              */.msg_requester_id(),
-// /* input   logic    [7:0]               */.msg_tag(),
-// /* input   logic    [11:0]              */.msg_byte_count(),
-// /* input   logic    [31:0]              */.msg_lower_addr(),
-// /* input   logic    [31:0]              */.msg_upper_addr(),
-// /* input   logic    [15:0]              */.msg_dest_bdf_id(),
-
-// // input   logic    [31:0]          msg_data1(),
-// // input   logic    [31:0]          msg_data2(),
-// // input   logic    [31:0]          msg_data3(),
-
-// /* input   logic   [DATA_WIDTH-1:0]     */.msg_data(),
-
-// /* input   logic    [9:0]               */.msg_config_dw_number(),
-
-// /* input   logic    [2:0]               */.msg_completion_status(),
-// /* input   logic    [7:0]               */.msg_message_code(),
-// /* input   logic                        */.msg_valid(1'b0),
-// /* output  logic                        */.MSG_ARB_ACK(),
-// //-------------------------------------------------------------
-
-
-// //REQ_INTF
-// /* input   logic    [2:0]               */.req_tlp_mem_io_msg_cpl_conf(req_tlp_mem_io_msg_cpl_conf),
-// /* input   logic                        */.req_tlp_address_32_64(req_tlp_address_32_64),
-// /* input   logic                        */.req_tlp_read_write(req_tlp_read_write),
-// /* input   logic    [2:0]               */.req_TC(req_TC),
-// /* input   logic    [2:0]               */.req_ATTR(req_ATTR),
-// /* input   logic    [15:0]              */.req_requester_id(req_requester_id),
-// /* input   logic    [7:0]               */.req_tag(req_tag),
-// /* input   logic    [11:0]              */.req_byte_count(req_byte_count),
-// /* input   logic    [31:0]              */.req_lower_addr(req_lower_addr),
-// /* input   logic    [31:0]              */.req_upper_addr(req_upper_addr),
-// /* input   logic    [15:0]              */.req_dest_bdf_id(req_dest_bdf_id),
-
-// // input   logic    [31:0]             req_data1(),
-// // input   logic    [31:0]             req_data2(),
-// // input   logic    [31:0]             req_data3(),
-// /* input   logic    [DATA_WIDTH-1:0]    */.req_data({32'h0, req_data3, req_data2, req_data1}),
-// /* input   logic    [9:0]               */.req_config_dw_number(config_dw_number),
-
-// // /* input   logic    [2:0]               */.req_completion_status(),
-// // /* input   logic    [7:0]               */.req_message_code(),
-// /* input   logic                        */.req_valid(req_valid),
-// /* output  logic                        */.REQ_ARB_ACK(),
-// //-------------------------------------------------------------
-// //-------------------------------------------------------------
-
-// /* output   logic    [2:0]              */.x_tlp_mem_io_msg_cpl_conf(tlp_mem_io_msg_cpl_conf),
-// /* output   logic                       */.x_tlp_address_32_64(tlp_address_32_64),
-// /* output   logic                       */.x_tlp_read_write(tlp_read_write),
-// /* output   logic    [2:0]              */.x_TC(TC),
-// /* output   logic    [2:0]              */.x_ATTR(ATTR),
-// /* output   logic    [15:0]             */.x_requester_id(requester_id),
-// /* output   logic    [7:0]              */.x_tag(tag),
-// /* output   logic    [11:0]             */.x_byte_count(byte_count),
-// /* output   logic    [31:0]             */.x_lower_addr(lower_addr),
-// /* output   logic    [31:0]             */.x_upper_addr(upper_addr),
-// /* output   logic    [15:0]             */.x_dest_bdf_id(dest_bdf_id),
-
-// // output   logic    [31:0]              x_data1(),
-// // output   logic    [31:0]              x_data2(),
-// // output   logic    [31:0]              x_data3(),
-// /* output   logic   [DATA_WIDTH-1:0]    */.x_data({dumb_signal2 ,data3, data2, data1}),
-
-// /* output   logic    [9:0]              */.x_config_dw_number(config_dw_number),
-
-// /* output   logic    [2:0]              */.x_completion_status(completion_status),
-// /* output   logic    [7:0]              */.x_message_code(message_code),
-// /* output   logic                       */.x_valid(valid),
-// /* input    logic                       */.X_ARB_ACK(TL_TX_ACK)
-
-
-// );
-
-
-// ----------------------------------------------------------------------------------------------------------------------------------------------------
-/* 
-TL_TX_MAL TL_TX0 
-(           .clk(clk),                                  //input   logic                    clk, 
-            .rst(rst),                                  //input   logic                    rst,
-            .DPI_MM(DPI_MM),                            //input   logic                    DPI_MM,
-
-            .port_write_en(port_write_en),                        //input   logic    [9:0]           port_write_en,
-            .tlp_mem_io_msg_cpl_conf(tlp_mem_io_msg_cpl_conf),    //input   logic    [1:0]           tlp_mem_io_msg_cpl_conf,
-            .tlp_address_32_64(tlp_address_32_64),                //input   logic                    tlp_address_32_64,
-            .tlp_read_write(tlp_read_write),                      //input   logic                    tlp_read_write,
-
-
-            .TC(TC),                                    //input   logic    [2:0]          TC,
-            .ATTR(ATTR),                                //input   logic    [2:0]          ATTR,
-            .requester_id(requester_id),                    //input   logic    [15:0]         device_id,
-            .tag(tag),                                  //input   logic    [7:0]          tag,
-            .byte_count(byte_count),                    //input   logic    [11:0]         byte_count,
-            .lower_addr(lower_addr),                    //input   logic    [31:0]         lower_addr,
-            .upper_addr(upper_addr),                                               //input   logic    [31:0]         upper_addr,
-            .config_dw_number(config_dw_number),        //input   logic    [9:0]          config_dw_number,
-
-
-            .data1(data1),                                //input   logic    [31:0]         data1,
-            .data2(data2),                                //input   logic    [31:0]         data2,
-            .data3(data3),                                //input   logic    [31:0]         data3,
-
-            .dest_bdf_id(dest_bdf_id),                  //input   logic    [15:0]         dest_bdf_id,
-            
-            .completion_status(completion_status),
-            .message_code(message_code),
-            
-            .valid(valid),                              //input   logic                   valid,
-
-
-            .RD_EN(RD_EN),                              //input   logic                   RD_EN,
-            .ALL_BUFFS_EMPTY(ALL_BUFFS_EMPTY),          //output  logic                   EMPTY,
-            .VALID_FOR_DL(VALID_FOR_DL),                //output  logic                   VALID,
-            .OUT_TLP_DW(OUT_TLP_DW),                     //output  logic    [31:0]         OUT_TLP_DW    );
-
-            .TLP_START_BIT_OUT_COMB(TLP_START_BIT_OUT_COMB),
-            .TLP_END_BIT_OUT_COMB(TLP_END_BIT_OUT_COMB),
-
-            // .CPL_ARB_ACK(CPL_ARB_ACK),
-
-            .fsm_finished(fsm_finished),
-            .fsm_started (fsm_started),
-            .ACK (TL_TX_ACK)
-); 
-*/
 wire valid_tlp;
 assign valid_tlp = !ALL_BUFFS_EMPTY;
 
@@ -577,20 +655,21 @@ assign valid_tlp = !ALL_BUFFS_EMPTY;
 /* input */  logic                     RX_flush;
 /* output */ wire                      RX_EMPTY;
 /* output */ logic                     RX_OUT_EMPTY;
-/* output */ logic [DATA_WIDTH-1:0]    RX_OUT_TLP_DW;      
-/* output */ logic [DATA_WIDTH-1:0]    RX_OUT_TLP_DW_COMB; 
+/* output */ logic [BUS_WIDTH-1:0]    RX_OUT_TLP_DW;      
+/* output */ logic [BUS_WIDTH-1:0]    RX_OUT_TLP_DW_COMB; 
 
 wire new_tlp_ready = TLP_START_BIT_OUT_COMB;
 
-TL_RX_ERROR_CHECK #(.DATA_WIDTH(32)) tl_rx_error_check
+
+/* TL_RX_ERROR_CHECK */ TL_RX_ERROR_CHECK128 #(.DATA_WIDTH(32)) tl_rx_error_check
 (
-    /* input   logic */ .clk(clk),
-    /* input   logic */ .rst(rst),
+    /* input   logic */                         .clk(clk),
+    /* input   logic */                         .rst(rst),
 
 ///////////FROM DL///////////////////////
-    /* input  logic   [31:0] */   .TLP(OUT_TLP_DW),
-    /* input  logic */            .new_tlp_ready(new_tlp_ready), 
-    /* input  logic */            .valid(valid_tlp),
+    /* input  logic   [31:0] */                 .TLP(OUT_TLP_DW),
+    /* input  logic */                          .new_tlp_ready(new_tlp_ready), 
+    /* input  logic */                          .valid(valid_tlp),
 ///////////P_NP_CPL BUFFER////////////////////
 //Write (H||D)(), Read (H)
 
@@ -600,7 +679,7 @@ TL_RX_ERROR_CHECK #(.DATA_WIDTH(32)) tl_rx_error_check
     // /* output  logic [DATA_WIDTH-1:0] */      .IN_TLP_DW(RX_IN_TLP_DW),
     /* output  logic */                       .WR_EN(RX_WR_EN),
     /* output  logic */                       .flush(RX_flush),
-    /* output  logic */                       .commit(RX_commit)
+    /* output  logic */                       .commit(RX_commit),
     // output  logic                       TLP_BUFFER_RD_EN(), //Not Busy
     ////////////////////////////////////
     // output  logic                       DATA_BUFFER_WR_EN(),          
@@ -617,37 +696,19 @@ TL_RX_ERROR_CHECK #(.DATA_WIDTH(32)) tl_rx_error_check
     // /* output  logic  [31:0] */    .upper_addr(),
     // /* output  logic  [31:0] */    .data(),
     // /* output  logic  [11:0] */    .config_dw_number()
-);
-
-TX_NP_REQ_BUFF #(.TIMEOUT(50_000),.PERIOD(10), .DATA_WIDTH(32), .MEMORY_DEPTH(16)) tx_np_req_buff
-(
-/* input   logic */          .clk(clk),
-/* input   logic */          .rst(rst),
-
-/* input   logic */          .WR_EN(),
-/* input   logic */          .RD_EN(),
-
-//SEL
-/* input   logic   [7:0] */  .TAG(),
-
-/* input   logic   [7:0] */  .DEST(),
-// input   logic  [14:0]  START_TIME,
-// input   logic          EXIST
-
-/* output  logic */          .EXIST(),
 
 
-
-/* output  logic */          .EMPTY(),
-
-/* output  logic */          .FULL(),
-
-/* output  logic    [31:0] */ .OUT()
-
+        //------------------------------------------------------------------------------------
+    //------------------------------------------------------------------------------------
+    //------------------------------------------------------------------------------------
+    /* output    logic         */                      .NP_RDEN     (NP_RDEN),
+    /* output    logic  [7:0]  */                      .NP_TAG_IDX  (NP_TAG_IDX),
+    /* output    logic  [15:0] */                      .NP_DEST_IDX (NP_DEST_IDX),
+    /* input   logic         */                        .NP_REQ_EXIST(NP_REQ_EXIST)
 );
 
 
-RX_PNPC_BUFF #(.DATA_WIDTH(32)) PNPC_BUFF0
+RX_PNPC_BUFF #(.DATA_WIDTH(BUS_WIDTH)) PNPC_BUFF0
 (
     .clk(clk),                            //input  logic                     clk,
     .rst(rst),                            //input  logic                     rst,
@@ -663,7 +724,7 @@ RX_PNPC_BUFF #(.DATA_WIDTH(32)) PNPC_BUFF0
     .OUT_TLP_DW_COMB(RX_OUT_TLP_DW)      
 );
 
-TL_RX_DECODER tl_rx_decoder
+/* TL_RX_DECODER */TL_RX_DECODER128 tl_rx_decoder
 (
     .clk(clk),
     .rst(rst),
@@ -728,89 +789,6 @@ FIFO DATA_BUFFER
 
 
 
-
-
-
-
-/* MASTER_BRIDGE master_bridge
-(
-    .PCLK(clk),     //     input logic         PCLK,
-    .PRESETn(rst),  //     input logic         PRESETn,
-
-
-
-    
-    // //SLAVE Interface (APB-Like Interface FROM Transaction )
-
-    .PENABLE(M_ENABLE), //     input   logic           PENABLE,
-    .PREADY(M_READY),   //     output  logic           PREADY,
-    
-    .tlp_mem_io_msg_cpl_conf(rx_tlp_mem_io_msg_cpl_conf),   //     input  logic  [2:0]     tlp_mem_io_msg_cpl_conf,
-    .tlp_address_32_64(rx_tlp_address_32_64),               //     input  logic            tlp_address_32_64,
-    .tlp_read_write(rx_tlp_read_write),                     //     input  logic            tlp_read_write,
-
-        
-    .first_dw_be(rx_first_dw_be),   //     input  logic  [3:0]     first_dw_be,
-    .last_dw_be(rx_last_dw_be),     //     input  logic  [3:0]     last_dw_be,
-    .lower_addr(rx_lower_addr),     //     input  logic  [31:0]    lower_addr,
-
-    // //calculate OFFSET and M_PSTRB
-
-    .data(DATA_BUFF_COMB_DATA_OUT), //     input  logic  [31:0]    data,
-    .last_dw(last_dw),              //     input  logic            last_dw,
-
-    .DATA_BUFF_EMPTY(DATA_BUFF_EMPTY),  //     input logic            DATA_BUFF_EMPTY,
-    .DATA_BUFF_RD_EN(DATA_BUFF_RD_EN),                 //     output logic            DATA_BUFF_RD_EN,
-
-    .config_dw_number(rx_config_dw_number),//     input  logic  [9:0]     config_dw_number,
-
-
-    // // Master Interface (TO APPLICATION & CONF MEMORY)
-
-    .M_PRDATA1(M_PRDATA1),  //     input  logic [31:0] M_PRDATA1,
-    .M_PRDATA2(),           //     input  logic [31:0] M_PRDATA2,
-
-    .M_PREADY1(M_PREADY1),  //     input  logic        M_PREADY1,
-    .M_PREADY2(),           //     input  logic        M_PREADY2,
-    
-
-    .M_PSEL1(M_PSEL1),      //     output logic        M_PSEL1,
-    .M_PSEL2(),             //     output logic        M_PSEL2,
-
-    .M_PADDR(M_PADDR),      //     output logic [31:0] M_PADDR,
-    .M_PENABLE(M_PENABLE),  //     output logic        M_PENABLE,
-    .M_PWRITE(M_PWRITE),    //     output logic        M_PWRITE,
-    .M_PSTRB(M_PSTRB),      //     output logic [3:0]  M_PSTRB,
-    .M_PWDATA(M_PWDATA)     //     output logic [31:0] M_PWDATA 
-
-
-    ////////////// TRANSMITER ///////////// FOR COMPLETION //////////////
-); */
-
-
-
-// APB_ALU #(
-// //   .RO_START(),           // parameter [31:0] RO_START =     'b11_11,
-// //   .RO_END(),             // parameter [31:0] RO_END   =     'b00_00,
-//      .MEMORY_DEPTH(3)       // parameter        MEMORY_DEPTH =  3 
-// ) core_layer
-// (
-
-//     .PCLK(clk),// input  logic PCLK, 
-//     .PRESETn(rst),// input  logic PRESETn,
-
-//     // //APB INTERFACE
-//     .PSEL(M_PSEL1),    // input  logic        PSEL, 
-//     .PENABLE(M_PENABLE), // input  logic        PENABLE,
-//     .PWRITE(M_PWRITE),  // input  logic        PWRITE,
-//     .PADDR(M_PADDR),   // input  logic [31:0] PADDR,
-//     .PSTRB(M_PSTRB),   // input  logic [3:0]  PSTRB,
-//     .PWDATA(M_PWDATA),  // input  logic [31:0] PWDATA,
-
-//     .PREADY(M_PREADY1),  // output logic        PREADY,
-//     .PRDATA(M_PRDATA1)  // output logic [31:0] PRDATA,
-
-// );
 
 AXI_MASTER #(.ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)) axi_master
 (   
@@ -893,11 +871,22 @@ AXI_MASTER #(.ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)) axi_master
     /* input   logic    [31:0] */ .RX_B_data2(RX_B_data2),                 //
     /* input   logic    [31:0] */ .RX_B_data3(RX_B_data3),                 //
 //-----------------------------------------------------------------------------------------                   
-    /* input   logic           */ .RX_B_Wr_En(RX_B_Wr_En)                  //
+    /* input   logic           */ .RX_B_Wr_En(RX_B_Wr_En),                  //
 //-----------------------------------------------------------------------------------------
     // ----------------------------------------------------------------------
     // ----------------------------------------------------------------------
-);
+
+    /////////////////////////////////////////////////////
+    ////////////////////FIFO TX/////////////////////////
+    /////////////////////////////////////////////////////
+
+    /* output logic                */ .RX_B_TX_DATA_FIFO_WR_EN(RX_B_TX_DATA_FIFO_WR_EN),
+    /* output logic [31:0]         */ .RX_B_TX_DATA_FIFO_data(RX_B_TX_DATA_FIFO_data)
+
+    /////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////
+
+); 
 
 
 AXI_SLAVE #(.ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)) axi_slave
@@ -950,78 +939,7 @@ AXI_SLAVE #(.ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)) axi_slave
 
  
 
-wire [31:0] dumb_signal;
-DOUBLE_IN_CPL_ARB #(.DATA_WIDTH(128)) double_in_cpl_arb
-(
-    .clk(clk),
-    .rst(rst),
 
-    //    I'll use this block to generate CPL/ CPLD 
-    //      .    .    .    .                        
-    //    //.\\//.\\//.\\//.\\ CPL FROM ERROR BLOCK     
-    
-    //-------------------------------------------------------------------------- (4)
-    /* input   logic    [2:0]           */.ERR_CPL_TC(ERR_CPL_TC),                      //.TC(TC)(),
-    /* input   logic    [2:0]           */.ERR_CPL_ATTR(ERR_CPL_ATTR),                    //.ATTR(ATTR)(),
-    //---------------------------------------------------------------------------(6)
-    /* input   logic    [15:0]          */.ERR_CPL_requester_id(ERR_CPL_requester_id),            //[[X]]  -- //COMPLETER ID 
-    /* input   logic    [7:0]           */.ERR_CPL_tag(ERR_CPL_tag),                     //[[X]].
-    /* input   logic    [11:0]          */.ERR_CPL_byte_count(ERR_CPL_byte_count),              //
-    //---------------------------------------------------------------------------(36)           
-    /* input   logic    [6:0]           */.ERR_CPL_lower_addr(ERR_CPL_lower_addr),              //[[X]]
-    //---------------------------------------------------------------------------(7)    
-                                          .ERR_CPL_completion_status(ERR_CPL_completion_status),
-    //---------------------------------------------------------------------------(96)
-    /* input   logic                    */.ERR_CPL_Wr_En(ERR_CPL_Wr_En),                 //.valid(valid)(),
-    //---------------------------------------------------------------------------(1)
-
-
-
-
-    //      .    .    .    .                        
-    //    //.\\//.\\//.\\//.\\ CPLD FROM RX BRIDGE  
-    /* input   logic                    */.RX_B_tlp_read_write(RX_B_tlp_read_write),          //
-    /* input   logic    [2:0]           */.RX_B_TC(RX_B_TC),               //
-    /* input   logic    [2:0]           */.RX_B_ATTR(RX_B_ATTR),             //
-    /* input   logic    [15:0]          */.RX_B_requester_id(RX_B_requester_id),        //
-    /* input   logic    [7:0]           */.RX_B_tag(RX_B_tag),              //
-    /* input   logic    [11:0]          */.RX_B_byte_count(RX_B_byte_count),       //
-//--------------------------------------------------------------------------------------
-    /* input   logic    [6:0]           */ .RX_B_lower_addr(RX_B_lower_addr),       //
-                                           .RX_B_completion_status(RX_B_completion_status),
-//-----------------------------------------------------------------------------------------           
-    // /* input   logic    [31:0]          */.RX_B_data1(RX_B_data1),                 //
-    // /* input   logic    [31:0]          */.RX_B_data2(RX_B_data2),                 //
-    // /* input   logic    [31:0]          */.RX_B_data3(RX_B_data3),                 //
-                                           .RX_B_data({32'h0, RX_B_data3, RX_B_data2, RX_B_data1}),
-//-----------------------------------------------------------------------------------------                   
-    /* input   logic                    */ .RX_B_Wr_En(RX_B_Wr_En),                  //
-//-----------------------------------------------------------------------------------------
-
-
-    /* output   logic    [1:0]           */.X_tlp_mem_io_msg_cpl(CPL_tlp_mem_io_msg_cpl), //type // .tlp_mem_io_msg_cpl_conf(tlp_mem_io_msg_cpl_conf)(),
-    /* output   logic                    */.X_tlp_address_32_64(CPL_tlp_address_32_64),       //fmt[0]      //.tlp_address_32_64(tlp_address_32_64)(),
-    /* output   logic                    */.X_tlp_read_write(CPL_tlp_read_write),          //fmt[1]      // .tlp_read_write(tlp_read_write)(),
-//-------------------------------------------------------------------------- (4)
-    /* output   logic    [2:0]           */.X_TC(CPL_TC),                      //.TC(TC)(), 
-    /* output   logic    [2:0]           */.X_ATTR(CPL_ATTR),                    //.ATTR(ATTR)(), 
-//---------------------------------------------------------------------------(6)
-    /* output   logic    [15:0]          */.X_requester_id(CPL_requester_id),            //[[X]]  -- //COMPLETER ID //.device_id(device_id)(),
-    /* output   logic    [7:0]           */.X_tag(CPL_tag),                     //[[X]].tag(tag)(),
-    /* output   logic    [11:0]          */.X_byte_count(CPL_byte_count),              //.byte_count(byte_count)(),
-//---------------------------------------------------------------------------(36)           
-    /* output   logic    [6:0]           */.X_lower_addr(CPL_lower_addr),              //[[X]]       //.lower_addr(lower_addr)(),
-                                           .X_completion_status(CPL_completion_status),
-//---------------------------------------------------------------------------(7)
-    // /* output   logic    [31:0]          */.X_data1(CPL_data1),                 //.data1(data1)(),
-    // /* output   logic    [31:0]          */.X_data2(CPL_data2),                 //.data2(data2)(),
-    // /* output   logic    [31:0]          */.X_data3(CPL_data3),                 //.data3(data3),  
-                                           .X_data({dumb_signal, CPL_data3, CPL_data2, CPL_data1}),
-    /////////////////////////////////////////////////////////////////////////////////////////////
-/* input   logic                         */.ACK(CPL_ARB_ACK),    ///////////////////////////////
-/* output  logic                         */.VALID(CPL_ARB_VALID)   ////////////////////////////
-    //////////////////////////////////////////////////////////////////////////////////////////
-);
 
 
 CONF_SPACE #(
@@ -1110,7 +1028,12 @@ task reset();
 endtask
 
 //32 bit
-task send_req_packet(int tlp_type_, int tlp_read_write_, int byte_count_, int address_, int tag_, int device_id_, int data1_, int data2_ = 0, int data3_ =0);
+bit [31:0] data_arr [] = new [3];
+int max=0;
+task send_req_packet(int tlp_type_, int tlp_read_write_, int byte_count_, int address_, int tag_, int device_id_=0, int data1_, int data2_ = 0, int data3_ =0);
+    bit b_tlp_read_write;
+    bit [11:0] b_byte_count;
+    bit [31:0] b_address;
     req_tlp_mem_io_msg_cpl_conf <= tlp_type_;        //0: memory, 1: io, 2: completion
     req_tlp_address_32_64  <= 0;          //0: 32-bit, 1: 64-bit
     req_tlp_read_write     <= tlp_read_write_;       //0: read, 1: write
@@ -1127,16 +1050,66 @@ task send_req_packet(int tlp_type_, int tlp_read_write_, int byte_count_, int ad
 
     req_tag <= tag_;
 
+    b_tlp_read_write = tlp_read_write_;
+    b_byte_count = byte_count_;
+    b_address = address_;
+    REQ_addr  <= 32'h0;
+    REQ_rd_wr <= 1;
+    REQ_data  <= {b_byte_count, b_tlp_read_write, 1'b0, 2'b00};
+    REQ_valid <= 1;
+    @(posedge clk);
+    REQ_addr  <= 32'h4;
+    REQ_rd_wr <= 1;
+    REQ_data  <= b_address;
+    REQ_valid <= 1;
+    @(posedge clk);
+
+
+    max = ((byte_count_-1)>>2) + 1;
+    data_arr[0] = data1_;
+    data_arr[1] = data2_;
+    data_arr[2] = data3_;
+for(int x = 0; x < max/* 3 */; x++)
+    begin
+        REQ_addr  <= 32'h14;
+        REQ_rd_wr <= 1;
+        REQ_data  <= data_arr[x]/* data_arr[x] */;
+        REQ_valid <= 1;
+        // REQ_WR_EN = 1;
+        @(posedge clk);
+    end
+
+
+    REQ_addr  <= 32'h10;
+    REQ_data  <= 1;
+    REQ_valid<=1;
+    @(posedge clk);
+    REQ_valid<=0;
+
     // req_device_id <= device_id_;
+
+
 
     req_data1 <= data1_;
     req_data2 <= data2_;
     req_data3 <= data3_;
+    begin
+
+    // REQ_WR_EN = 0; 
+    // for(int x = 0; x < max/* 3 */; x++)
+    // begin
+    //     REQ_data  = data_arr[x]/* data_arr[x] */;
+    //     REQ_WR_EN = 1;
+    //     @(posedge clk);
+    // end
+    // REQ_WR_EN = 0;
+    @(posedge clk);
+    end
 
     req_valid <= 1;         //Initiate Transaction Generation FSM
     wait(fsm_started);
-    req_valid <= 0; 
     wait(fsm_finished);
+    req_valid <= 0; 
     @(posedge clk);
 
 endtask
@@ -1147,13 +1120,38 @@ initial begin
     reset();
     RD_EN <= 1;
     //(1) #################### POSTED MEMORY 2-BYTES MEMORY WRITE TLP ##########################
-    send_req_packet(.tlp_type_(0), .tlp_read_write_(1), .byte_count_(8), .address_(32'h00_00_00_00), .device_id_(1), .tag_(1), .data1_(32'h0003_0007)
+    send_req_packet(.tlp_type_(0), .tlp_read_write_(1), .byte_count_(8), .address_(32'h00_00_00_00), .tag_(1), .data1_(32'h0003_0007)
     ,.data2_(32'h0001_0000));
 
-    send_req_packet(.tlp_type_(0), .tlp_read_write_(1), .byte_count_(8), .address_(32'h00_00_00_00), .device_id_(0), .tag_(2), .data1_(32'h0004_0004)
+    send_req_packet(.tlp_type_(0), .tlp_read_write_(1), .byte_count_(4), .address_(32'h00_00_00_00),  .tag_(2), .data1_(32'h0004_0004)
     ,.data2_(32'h0001_0000));
 
-    send_req_packet(.tlp_type_(0), .tlp_read_write_(0), .byte_count_(8), .address_(32'h00_00_00_08), .device_id_(0), .tag_(3), .data1_(32'h0003_0007)
+    send_req_packet(.tlp_type_(0), .tlp_read_write_(1), .byte_count_(4), .address_(32'h00_00_00_04),  .tag_(2), .data1_(32'h0001_0000)
+    ,.data2_(32'h0001_0000));
+
+    
+
+        send_req_packet(.tlp_type_(0), .tlp_read_write_(1), .byte_count_(4), .address_(32'h00_00_00_00),  .tag_(2), .data1_(32'h0003_0002)
+    ,.data2_(32'h0001_0000));
+
+    send_req_packet(.tlp_type_(0), .tlp_read_write_(1), .byte_count_(4), .address_(32'h00_00_00_04),  .tag_(2), .data1_(32'h0001_0000)
+    ,.data2_(32'h0001_0000));
+
+
+    send_req_packet(.tlp_type_(0), .tlp_read_write_(1), .byte_count_(4), .address_(32'h00_00_00_00),  .tag_(2), .data1_(32'h0001_0001)
+    ,.data2_(32'h0001_0000));
+
+    send_req_packet(.tlp_type_(0), .tlp_read_write_(1), .byte_count_(4), .address_(32'h00_00_00_04),  .tag_(2), .data1_(32'h0001_0000)
+    ,.data2_(32'h0001_0000));
+
+    send_req_packet(.tlp_type_(0), .tlp_read_write_(1), .byte_count_(4), .address_(32'h00_00_00_00),  .tag_(2), .data1_(32'h000a_0002)
+    ,.data2_(32'h0001_0000));
+
+    send_req_packet(.tlp_type_(0), .tlp_read_write_(1), .byte_count_(4), .address_(32'h00_00_00_04),  .tag_(2), .data1_(32'h0001_0000)
+    ,.data2_(32'h0001_0000));
+
+
+    send_req_packet(.tlp_type_(0), .tlp_read_write_(0), .byte_count_(20), .address_(32'h00_00_00_08),  .tag_(3), .data1_(32'h0003_0007)
     ,.data2_(32'h0001_0000), .data3_(32'h0001_0001));
     // send_req_packet(.tlp_type_(0), .tlp_read_write_(1), .byte_count_(4), .address_(32'h00_00_00_04), .data1_(32'h0100_0200)
     // ,.data2_(32'h0000_0001));

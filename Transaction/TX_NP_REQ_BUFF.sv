@@ -91,9 +91,11 @@ input   logic          WR_EN,
 input   logic          RD_EN,
 
 //SEL
-input   logic  [7:0]   TAG,
+input   logic  [7:0]   TAG_IN,
+input   logic  [7:0]   TAG_IDX,
 
-input   logic  [7:0]   DEST,
+input   logic  [7:0]   DEST_IN,
+input   logic  [7:0]   DEST_IDX,
 // input   logic  [14:0]  START_TIME,
 // input   logic          EXIST
 
@@ -118,7 +120,7 @@ localparam real_size = ($clog2(TIMEOUT/PERIOD) <= 15) ? ($clog2(TIMEOUT/PERIOD))
 
 
 // logic  [14:0]  UPPER_TIME;
-// | TAG[7:0] | Destination[7:0]  | Start-Time[14:0]  | Free [1]  |
+// | TAG_IN[7:0] | Destination[7:0]  | Start-Time[14:0]  | Free [1]  |
 // |  8 bits  |     8 bits        |      15 bits      |   1 bit   |
 // |---------- ------------------- ------------------- -----------
 // | [31:25]  |     [24:16]       |      [15:1]       |    [0]    |
@@ -163,7 +165,7 @@ Arbiter #(.WIDTH(16), .DESC(0)) arbiter
 );
 
 Timer#(.WIDTH(TIMER_WIDTH)) timer 
-(.clk(clk), .rst(rst), .sync_rst(1'b1), .timer(now_time));
+(.clk(clk), .rst(rst), .sync_rst(1'b0), .timer(now_time));
 
 
 
@@ -188,7 +190,7 @@ end
 
 always@(*)
 begin
-    OR_X[0] = OUT_X[0];
+    // OR_X[0] = OUT_X[0];
     for(int x = 0 ; x < MEMORY_DEPTH; x++ ) begin
         
         TAG_X[x]            =   mem[x][31:24];
@@ -199,20 +201,20 @@ begin
 
         FREE_X[x]           =   mem[x][0];
 
-        OUT_X[x]            =   ((mem[x][31:24] == TAG)&&(mem[x][0] == 0))? {TAG_X[x], DESTINATION_X[x], START_TIME_X[x], FREE_X[x]} : 0;
+        // OUT_X[x]            =   ((mem[x][31:24] == TAG_IN)&&(mem[x][0] == 0))? {TAG_X[x], DESTINATION_X[x], START_TIME_X[x], FREE_X[x]} : 0;
 
-        SAME_TAG_X[x]       =   ((mem[x][31:24] == TAG)&&(mem[x][0] == 0))? 1 : 0;
+        SAME_TAG_X[x]       =   ((mem[x][23:16] == DEST_IDX)&&(mem[x][31:24] == TAG_IDX)&&(mem[x][0] == 0))? 1 : 0;
         
         TIME_OUT[x]         =   (({(mem[x][15:1] + {(real_size ){1'b1}})} == UPPER_TIME)&&(mem[x][0] == 0))? 1 : 0;
 
     end
 
-    for (int y = 1; y < MEMORY_DEPTH; y++) begin
-        OR_X[y] = OR_X[y-1] | OUT_X[y];         
-    end
+    // for (int y = 1; y < MEMORY_DEPTH; y++) begin
+    //     OR_X[y] = OR_X[y-1] | OUT_X[y];         
+    // end
 
 
-    OUT = OR_X[MEMORY_DEPTH-1];    
+    // OUT = OR_X[MEMORY_DEPTH-1];    
 
 
 end   
@@ -243,7 +245,7 @@ always@(posedge clk or negedge rst) begin
             if(ARB_FREE_X[x]) begin
                 if(WR_EN) begin
                     if(~EXIST) begin
-                        mem[x] <= {TAG, DEST, UPPER_TIME, 1'b0};
+                        mem[x] <= {TAG_IN, DEST_IN, UPPER_TIME, 1'b0};
                         NEXT_TIME<= UPPER_TIME + {real_size{1'b1}};
                     end
                 end

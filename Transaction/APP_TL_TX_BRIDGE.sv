@@ -37,6 +37,17 @@ module APP_TL_TX_BRIDGE
     input  logic  [31:0]    data2,
     input  logic  [31:0]    data3,
 
+      //////////////////////////////////////////////
+     ///////////////// NEW FIFO TX ////////////////
+    //////////////////////////////////////////////
+    // input   logic [31:0]    data_in,
+    // input   logic           wr_en,
+    // input   logic           rd_en,
+    // output  logic [31:0]    data_out,
+    // output  logic           data_out_valid,
+     /////////////////////////////////////////////////
+    /////////////////////////////////////////////////
+
     input  logic  [15:0]    dest_bdf_id,
     input  logic  [9:0]     config_dw_number,
     
@@ -76,13 +87,15 @@ module APP_TL_TX_BRIDGE
     output logic  [31:0]    upper_addr_reg,
     output logic  [31:0]    data_reg,
 
+    
+
     output logic  [15:0]    dest_bdf_id_reg,
     output logic  [9:0]     config_dw_number_reg,
 
     output logic  [2:0]     completion_status_reg,
     output logic  [7:0]     message_code_reg,
 
-    output logic            valid_reg,
+    output logic            valid_reg
 
 /////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////
@@ -90,7 +103,7 @@ module APP_TL_TX_BRIDGE
 ////////////////Double In ARB////////////////////////////////////
 /////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////
-    output logic            ACK
+    // output logic            ACK
 
 
 );
@@ -129,6 +142,7 @@ always@(*)
 begin
     data_reg = data_file[data_address];
 end
+
 
 always@(*)
 begin
@@ -198,7 +212,7 @@ begin
     endcase
 
 end
-
+logic fsm_finished_stage2; 
 always@(posedge clk or negedge rst)
 begin
     if(!rst)
@@ -226,16 +240,17 @@ begin
         completion_status_reg           <= 0;
         message_code_reg                <= 0;
 
-
+        fsm_finished_stage2             <= 0;
 
         valid_reg                       <= 0;
-        ACK                             <=0;
+        // ACK                             <=0;
 
     end
     else
     begin
-
-                if(valid && fsm_finished)
+                fsm_finished_stage2 <= fsm_finished;
+                
+                if(valid && fsm_finished_stage2)
                 begin
                     fmt_reg                     <= fmt;
                     type_reg                    <= type_;
@@ -244,7 +259,15 @@ begin
                     device_id_reg               <= device_id;
                     //for the same address or ID
                     requester_id_reg            <= requester_id;
-                    tag_reg                     <= tag;                  
+                    case(tlp_mem_io_msg_cpl_conf)
+                    3: begin
+                        tag_reg <= tag;
+                    end
+                    default: begin
+                        tag_reg                     <= tag_reg + 1; ///* tag */;
+                    end
+                    endcase
+                                     
                     dest_bdf_id_reg             <= dest_bdf_id;  
                     byte_count_reg              <= byte_count;
                     lower_addr_reg              <= lower_addr;
@@ -256,13 +279,13 @@ begin
                     completion_status_reg       <= completion_status;
                     message_code_reg            <= message_code;
                 end
-                if(fsm_finished) begin
+                if(fsm_finished_stage2) begin
                     valid_reg                   <= valid;
-                    ACK                         <= ~ACK&&valid;
+                    // ACK                         <= ~ACK&&valid;
                 end
                 else if(fsm_started) begin
                     valid_reg                   <= 1'b0;
-                    ACK                         <= 1'b0;
+                    // ACK                         <= 1'b0;
                 end 
     end
 end

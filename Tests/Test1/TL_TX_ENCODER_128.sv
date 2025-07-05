@@ -1,5 +1,5 @@
 
-module TL_TX_ENCODER_COMPL
+module TL_TX_ENCODER_128
 (
 input   logic        clk, //1
 input   logic        rst, //2
@@ -25,7 +25,7 @@ input   logic  [9:0]  config_dw_number, //14
  ////////////////FIFO_TX////////////////////
 ///////////////////////////////////////////
 input   logic  [31:0]    data,//15
-output  logic           rd_en,
+output  logic            rd_en,
 
  ///////////////////////////////////////////
 ///////////////////////////////////////////
@@ -60,13 +60,25 @@ output  logic         tlp_end_flag,
 output  logic         fsm_started,
 output  logic         fsm_finished,
 output  logic         fsm_finished_pulse,
-output  logic  [9:0]       data_address,
+output  logic  [9:0]  data_address,
 
 
-output  logic  [31:0]  TLP //25
+output  logic  [127:0]  TLP, //25
+
+output  logic           commit,
+
+//---------------------------------------------------------------------------------
+//---------------------------------------------------------------------------------
+output  logic [7:0]           NP_TLP_TAG,
+output  logic [15:0]          NP_TLP_REQ_ID//,
+//---------------------------------------------------------------------------------
+//---------------------------------------------------------------------------------
+// output  logic [2:0]           TLP_MEM_IO_MSG_CPL_COMP
 );
-typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H2_CPL, H1_MSG, H2_MSG, H3_MSG, DATA, FINISH} State;
+typedef enum reg [3:0] {IDLE=0, HEADER, DATA, FINISH} State;
     localparam reg R = 1'b0;
+    localparam REQ = 0, CPL = 1, MSG = 2;
+    localparam MEM = 'b00, IO = 'b01, CONF = 'b10;
 
     //localparam [1:0] MEMORY_TYPE = 2'b00, IO_TYPE = 2'b, CMPL_TYPE, MSG_TYPE
     
@@ -87,7 +99,21 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
 
     Mem: 1 ~ 1024
     */
+    reg         next_commit;
     reg [31:0]  next_TLP;
+
+    reg [31:0]  next_HDW0;
+    reg [31:0]  next_HDW1;
+    reg [31:0]  next_HDW2;
+    reg [31:0]  next_HDW3;
+
+    reg [31:0]  next_Data0;
+    reg [31:0]  next_Data1;
+    reg [31:0]  next_Data2;
+    reg [31:0]  next_Data3;
+
+    
+
     reg [1:0]   next_P_NP_CPL;
     reg         next_PNPC_BUFF_WR_EN;
     reg         next_HEADER_DATA;
@@ -101,7 +127,7 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
     reg         next_tlp_start_flag;
     reg         next_tlp_end_flag;
 
-    reg [1:0]   counter,
+    reg [9:0]   counter,//<<<<<<<<< 1024 DW
                 next_counter;
 
     reg [9:0]   next_data_address;
@@ -159,8 +185,11 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
                     begin
                         packet_classification = 2'b11;
                     end
+                    default: packet_classification = 2'b00;
+
                     endcase
     end
+    
     reg fsm_finished_stage2;
     assign fsm_finished_pulse = fsm_finished & !fsm_finished_stage2;
     always@(posedge clk or negedge rst) begin
@@ -300,18 +329,78 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
     begin 
         if(!rst)
         begin 
-            TLP         <= 0;
-            current     <= IDLE;
-            counter     <= 0;
-            data_address <= 0;
+            TLP           <=     0;
+            current       <=     IDLE;
+            counter       <=     0;
+            data_address  <=     0;
+            commit        <=     0;
+
+            NP_TLP_TAG    <=     0;
+            NP_TLP_REQ_ID <=     0;
+
+            // TLP_MEM_IO_MSG_CPL_COMP <= 0;
         end
         else
         begin
-            
-            TLP     <= next_TLP; 
             current <= next;
+            TLP     <= 0; 
+            commit  <= next_commit;
             counter <= next_counter;
             data_address <= next_data_address;
+            NP_TLP_TAG    <=     0;
+            NP_TLP_REQ_ID <=     0;
+            // TLP_MEM_IO_MSG_CPL_COMP <= 0;
+            case(current)
+            IDLE: begin
+                if(valid) begin //next cycle after valid
+                    TLP <= {next_HDW0, next_HDW1, next_HDW2, next_HDW3};
+                    NP_TLP_TAG <= tag;
+                    NP_TLP_REQ_ID <= device_id;
+/*                     case(type_[4:3])
+                    REQ: begin
+                    case(type_[2:1])
+                            MEM:
+                            begin
+                                TLP_MEM_IO_MSG_CPL_COMP<= 0;
+                            end
+                            IO: begin
+                                TLP_MEM_IO_MSG_CPL_COMP<= 1;
+                            end
+                            CONF: begin
+                                TLP_MEM_IO_MSG_CPL_COMP<= 4;
+                            end
+                        endcase 
+                        end
+                        CPL: begin
+                            TLP_MEM_IO_MSG_CPL_COMP<= 3;
+                        end
+                        MSG: begin
+                            TLP_MEM_IO_MSG_CPL_COMP<= 2;
+                        end
+                    endcase */
+                end
+            end
+            HEADER:
+            begin
+                 if(fmt[1])
+                    begin
+                        TLP <= {next_Data0, next_Data1, next_Data2, next_Data3};
+                    
+                    end
+                    else
+                    begin
+                        //next_TLP = nothing and next_PNPC_BUFF_WR_EN is not save that nothing TLP
+                        TLP <= 0;
+                    end
+            end
+            DATA: begin
+                TLP <= {next_Data0, next_Data1, next_Data2, next_Data3};
+            end
+            FINISH: begin
+
+            end
+            endcase
+
 
             
         end
@@ -337,193 +426,185 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
         next_tlp_start_flag = 1'b0;
         next_tlp_end_flag = 1'b0;
         rd_en = 1'b0;
+                    next_HDW0 = 0;
+                    next_HDW1 = 0;
+                    next_HDW2 = 0;
+                    next_HDW3 = 0;
+
+                    next_Data0 = TLP[127:96];
+                    next_Data1 = TLP[95:64];
+                    next_Data2 = TLP[63:32];
+                    next_Data3 = TLP[31:0];
+
+                    next_commit = 0;
 
         case(current)
             IDLE:
             begin
                 if(valid)
                 begin
-                    next = H0;
-                    next_TLP = {fmt, type_, R, TC, R, ATTR[2], R, 1'b0, 1'b0, 1'b0, ATTR[1:0], 2'b00, (mal_length)};
-                    
                     // Extra Logic For VC Buffers
-                    next_P_NP_CPL = packet_classification;
-                    next_HEADER_DATA = 1'b0;
-                    next_PNPC_BUFF_WR_EN = 1'b1;
+                    next_P_NP_CPL        = packet_classification;
+                    next_HEADER_DATA     = 1'b0;
+                    // next_PNPC_BUFF_WR_EN = 1'b1;
+                    
+                    next_fsm_started     = 1'b1;
+                    next_fsm_finished    = 1'b0;
+                    
+                    next_tlp_start_flag  = 1'b1;
+                    next_tlp_end_flag    = 1'b0;
                     
 
-                    next_fsm_started = 1'b1;
-                    next_fsm_finished = 1'b0;
-
-                    next_tlp_start_flag = 1'b1;
-                    next_tlp_end_flag = 1'b0;
-                end
-            end
-            H0:
-            begin
-                
-                case(type_[4:3])
+                    next_HDW0 = {fmt, type_, R, TC, R, ATTR[2], R, 1'b0, 1'b0, 1'b0, ATTR[1:0], 2'b00, (mal_length)};
+                    
+                    case(type_[4:3])
                     2'b00: //Memory Or IO Or Config
                     begin
-                        next = H1_REQ;
-                        next_TLP = {device_id, tag, Last_DW_BE, First_DW_BE};
-                    end
-                    2'b01: //Completion
-                    begin
+                        // next = H1_REQ;
+                        next_HDW1 = {device_id, tag, Last_DW_BE, First_DW_BE};
+                        case(type_[2:1])
+                            2'b00: //Memory
+                            begin
+                                if (fmt[0])
+                                begin
+                                    // next = H_ADDR64;
+                                    next_HDW2 = {upper_address[31:0]};
+                                    next_HDW3 = {lower_address[31:0]};
+                                end
+                                else
+                                begin
+                                    // next = H_ADDR32; //To End Node
+                                    next_HDW2 = {lower_address[31:2],2'b00};
+                                end
+                            end
+                            2'b01: // IO
+                            begin
+                                // next = H_ADDR32; //To End Node
+                                next_HDW2 = {lower_address[31:2],2'b00};
+                            end
+                            2'b10: // CONF
+                            begin
+                                // next = H_ID; //To End Node
+                                next_HDW2 <= {bdf_id, 4'b0000, config_dw_number, 2'b00};
+                            end
+                        endcase
 
-                        next = H1_CPL;
-                        next_TLP = {device_id, completion_status, 1'b0, byte_count};
                     end
-                    2'b10: //Message
+                    2'b01: // Completion
                     begin
-                        next = H1_MSG;
-                        next_TLP = {device_id, tag, message_code};
+                        // next = H1_CPL;
+                        next_HDW1 = {device_id, completion_status, 1'b0, byte_count};  
+                        next_HDW2 = {requester_id, tag, 1'b0, completion_lower_address};
                     end
-                endcase
+                    2'b10: // Message
+                    begin
+                        // next = H1_MSG;
+                        next_HDW1 = {device_id, tag, message_code};
+
+                    end
+                    endcase  
+                     if(!fmt[1])
+                    begin
+                        next_tlp_end_flag = 1'b1;
+                    end
+                    next = HEADER;
+                    next_PNPC_BUFF_WR_EN = 1;
+                end
             end
-
-            H1_REQ:
+            HEADER:
             begin
-                case(type_[2:1])
-                    2'b00: //Memory
+                    next_PNPC_BUFF_WR_EN = 0;
+                    if(fmt[1])
                     begin
-                        if (fmt[0])
+                        next_HEADER_DATA = 1'b1;
+                        next_Data0 = data;
+                        next_Data1 = 0;
+                        next_Data2 = 0;
+                        next_Data3 = 0;
+
+                        next = DATA;  //<<<<<<<<<<<<<<<<<<
+                        rd_en = 1'b1; //<<<<<<<<<<<<<<<<<<
+                        //next_TLP = data;
+                        next_data_address = data_address + 1;
+                        next_counter = counter + 1;   
+
+                        if(counter == Length-1) 
                         begin
-                            next = H_ADDR64;
-                            next_TLP = {upper_address[31:0]};
+                            next_PNPC_BUFF_WR_EN = 1'b1; 
+                            
                         end
-                        else
-                        begin
-                            next = H_ADDR32; //To End Node
-                            next_TLP = {lower_address[31:2],2'b00};
-                        end
+                                            
                     end
-                    2'b01: //IO
+                    else
                     begin
-                        next = H_ADDR32; //To End Node
-                        next_TLP = {lower_address[31:2],2'b00};
+                        //next_TLP = nothing and next_PNPC_BUFF_WR_EN is not save that nothing TLP
+                        next_PNPC_BUFF_WR_EN = 1'b0;
+                        next = FINISH;
+                        next_tlp_start_flag = 1'b0;
+                        next_tlp_end_flag = 1'b1;
+                        next_commit = 1;
                     end
-                    2'b10: //CONF
-                    begin
-                        next = H_ID; //To End Node
-                        next_TLP <= {bdf_id, 4'b0000, config_dw_number, 2'b00};
-                    end
-                endcase
             end
 
-            H_ADDR32: // End Node   
-            begin
-                if(fmt[1])
-                begin
-                    next_HEADER_DATA = 1'b1; 
-                    next = DATA; //<<<<<<<<<<<<<<<<<<
-                    rd_en = 1'b1; //<<<<<<<<<<<<<<<<<<
-                    next_data_address = data_address + 1;
-                    next_TLP = data;
-                    next_counter = counter + 1;
-                end
-                else
-                begin
-                    //next_TLP = nothing and next_PNPC_BUFF_WR_EN is not save that nothing TLP
-                    next = FINISH;
-
-                    next_tlp_start_flag = 1'b0;
-                    next_PNPC_BUFF_WR_EN = 1'b0;
-                    next_tlp_end_flag = 1'b1;     //sfr w wa7d hytl3o m3 b3d
-
-                end
-            end
-
-            H_ADDR64:
-            begin
-                next = H_ADDR32; //To End Node
-                rd_en = 1'b1;    
-                next_TLP = {lower_address[31:2],2'b00};
-            end
-
-
-            H1_CPL: //Pre End Node
-            begin
-                next = H2_CPL; //To End Node
-                next_TLP = {requester_id, tag, 1'b0, completion_lower_address};
-
-
-/*                 
-                if(!fmt[1])
-                begin
-                    next_PNPC_BUFF_WR_EN = 1'b0;
-                end 
-*/
-            end
-
-            H2_CPL: // End Node
-            begin
-                if(fmt[1])
-                begin
-                    next_HEADER_DATA = 1'b1;
-                    next = DATA;  //<<<<<<<<<<<<<<<<<<
-                    rd_en = 1'b1; //<<<<<<<<<<<<<<<<<<
-                    next_TLP = data;
-                    next_data_address = data_address + 1;
-                end
-                else
-                begin
-                    //next_TLP = nothing and next_PNPC_BUFF_WR_EN is not save that nothing TLP
-                    next_PNPC_BUFF_WR_EN = 1'b0;
-                    next = FINISH;
-
-                    next_tlp_start_flag = 1'b0;
-                    next_tlp_end_flag = 1'b1;
-                end
-            end
-
-            H1_MSG:
-            begin
-                //....
-                // case(message_code)
-                
-                // endcase
-
-            end
-
-            H_ID: begin
-                if(fmt[1])
-                begin
-                    next_data_address = data_address + 1;
-                    next_HEADER_DATA = 1'b1;
-                    next = DATA;  // <<<<<<<<<<<<<<<<<<<
-                    rd_en = 1'b1; // <<<<<<<<<<<<<<<<<<<
-                    next_TLP = data;
-                    next_counter = counter + 1;
-                end
-                else
-                begin
-                //  next_TLP = nothing and next_PNPC_BUFF_WR_EN is not save that nothing TLP
-                    next_PNPC_BUFF_WR_EN = 1'b0;
-                    next = FINISH;
-
-                    next_tlp_start_flag = 1'b0;
-                    next_tlp_end_flag = 1'b1;
-                end
-            end
             DATA: //fmt[1]=1 (wr)
             begin
+                next_PNPC_BUFF_WR_EN = 1'b0;
                 next_counter = counter + 1;
-                next_data_address = data_address + 1;
-                if(counter<(Length))//0(Done), 1, 2
+                // next_data_address = data_address + 1;
+                    case(counter[1:0])
+                    0: begin
+                        next_Data0 = data;
+                        next_Data1 = 0;
+                        next_Data2 = 0;
+                        next_Data3 = 0;                        
+                    end
+                    1: begin
+                        // next_Data0 = data;
+                        next_Data1 = data;
+                        next_Data2 = 0;
+                        next_Data3 = 0;
+                    end
+                    2: begin
+                        // next_Data0 = data;
+                        // next_Data1 = 0;
+                        next_Data2 = data;
+                        next_Data3 = 0;
+                    end
+                    3:begin
+                        // next_Data0 = data;
+                        // next_Data1 = 0;
+                        // next_Data2 = 0;
+                        next_PNPC_BUFF_WR_EN = 1'b1;
+                        next_Data3 = data;
+                    end
+                    endcase  
+                if(counter == Length-1)
                 begin
-                    next_HEADER_DATA = 1'b1;
-                    next_TLP = data; //<<<<<<<<<<<<<<<<<<<<<
-                    rd_en = 1'b1;    //<<<<<<<<<<<<<<<<<<<<<
+                    next_PNPC_BUFF_WR_EN = 1'b1;
+                    rd_en = 1'b1; 
+                    next_tlp_end_flag = 1'b1;
+                end
+                else if(counter<(Length))//0(Done), 1, 2
+                begin
+                    rd_en = 1'b1; 
+                    // next_HEADER_DATA = 1'b1;  //<<<<<<<<<<<<<<<<<<<<||
+      //<<<<<<<<<<<<<<<<<<<<<<<<||
+                              //<<<<<<<<<<<<<<<<<<<<<<<<<||
                 end
                 else
                 begin
-                    next_counter = 0;
-
                     //next_TLP = nothing and next_PNPC_BUFF_WR_EN is not save that nothing TLP
+                    next_TLP = 0;
+                    next_Data0 = 0;  
+                    next_Data1 = 0;  
+                    next_Data2 = 0;  
+                    next_Data3 = 0;  
+                    
+                    next_counter = 0;
+                    next_HEADER_DATA = 0;
                     next_PNPC_BUFF_WR_EN = 1'b0;
                     next = FINISH;
-
+                    next_commit = 1;
                     next_tlp_start_flag = 1'b0;
                     next_tlp_end_flag = 1'b1;
                 end
@@ -531,9 +612,11 @@ typedef enum reg [3:0] {IDLE=0, H0, H1_REQ, H_ADDR32, H_ADDR64, H_ID,  H1_CPL, H
 
             FINISH:
             begin
+                next_PNPC_BUFF_WR_EN = 0;
                 next_fsm_started = 1'b0;
                 next_fsm_finished = 1'b1;
                 next = IDLE;
+                next_commit = 0;
 
             end
         endcase

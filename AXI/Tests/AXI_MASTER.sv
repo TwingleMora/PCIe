@@ -108,10 +108,25 @@ module AXI_MASTER#(parameter ADDR_WIDTH = 32, parameter DATA_WIDTH = 32)
     output logic [31:0]   RX_B_data3,                //
     output logic [31:0]   RX_B_data2,                //
     //-----------------------------------------------------------------------------------------                   
-    output logic          RX_B_Wr_En                 //
+    output logic          RX_B_Wr_En,                 //
     //-----------------------------------------------------------------------------------------
     // ----------------------------------------------------------------------
     // ----------------------------------------------------------------------
+    
+    /////////////////////////////////////////////////////
+    ////////////////////FIFO TX/////////////////////////
+    /////////////////////////////////////////////////////
+
+    output logic               RX_B_TX_DATA_FIFO_WR_EN,
+    output logic [31:0]        RX_B_TX_DATA_FIFO_data
+
+    /////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////
+
+
+
+
+
 );
 
 
@@ -185,7 +200,7 @@ MEM #(.DEPTH(32), .DATA_WIDTH(DATA_WIDTH)) MEM_MODULE2
 
 );
 
-initial begin
+/* initial begin
 logic [15:0] A =2, B=0;
 logic [7:0] OP=0;
 @(negedge aclk)
@@ -200,7 +215,7 @@ end
 
 //$stop;
 
-end
+end */
 
 /*
 - awaddr, awvalid
@@ -237,7 +252,7 @@ always@(*) begin
     finish = 0;
     case (current) 
     IDLE: begin //0
-        if(!(ACK||!VALID)) begin //(!ACK&&VALID)
+        if((!ACK&&VALID)) begin //(!ACK&&VALID)
             if(tlp_read_write)
                 next = WRITE;
             else
@@ -454,11 +469,26 @@ always@(posedge aclk or negedge aresetn) begin
         RX_B_Wr_En <= 0;
         RX_B_ATTR <= 0;
         RX_B_TC <= 0;
+//////////////////////////////////////////////
+//////////////////TX FIFO////////////////////
+        RX_B_TX_DATA_FIFO_data <= 0;
+        RX_B_TX_DATA_FIFO_WR_EN <=0;
+//////////////////////////////////////////////
+//////////////////////////////////////////////
         
     end
     else begin
+
         rdata_last <= 0;
         RX_B_Wr_En <= 0;
+
+          //////////////////////////////////////////////
+         //////////////////TX FIFO////////////////////
+        RX_B_TX_DATA_FIFO_data <= 0;
+        RX_B_TX_DATA_FIFO_WR_EN <=0;
+       //////////////////////////////////////////////
+      //////////////////////////////////////////////
+
         if(rready && rvalid)
         begin
             rdata_to_cpl_counter    <= rdata_to_cpl_counter + 1;
@@ -468,6 +498,12 @@ always@(posedge aclk or negedge aresetn) begin
             RX_B_requester_id       <= requester_id;
             RX_B_tag                <= tag;
 
+        //////////////////////////////////////////////
+        //////////////////TX FIFO////////////////////
+            RX_B_TX_DATA_FIFO_data <= rdata;
+            RX_B_TX_DATA_FIFO_WR_EN <=1;
+        //////////////////////////////////////////////
+        //////////////////////////////////////////////
             case(rdata_to_cpl_counter)
             0: RX_B_data1 <= rdata;
             1: RX_B_data2 <= rdata;
@@ -480,6 +516,11 @@ always@(posedge aclk or negedge aresetn) begin
             rdata_last <= 1;
             RX_B_Wr_En <= 1;
             r_data_length <= 0;
+
+        //////////////////////////////////////////////
+        //////////////////TX FIFO////////////////////
+            RX_B_TX_DATA_FIFO_WR_EN <= 1;
+        //////////////////////////////////////////////
         end
     end
 end

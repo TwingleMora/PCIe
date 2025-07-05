@@ -1,6 +1,8 @@
-module RX_PNPC_BUFF
+module TX_PNPC_BUFF
 #(parameter DATA_WIDTH = 32)
 (
+
+  // Crucial  
 input  logic                     clk,
 input  logic                     rst,
 input  logic                     HEADER_DATA, // 0: Header, 1: Data
@@ -8,30 +10,56 @@ input  logic [1:0]               P_NP_CPL, // Posted: 00, Non-Posted: 01, Comple
 input  logic [DATA_WIDTH-1:0]    IN_TLP_DW,
 input  logic                     WR_EN,
 input  logic                     RD_EN,
-
 input  logic                     commit,
 input  logic                     flush,
 
-output wire                      EMPTY,
 
-output logic                     FULL_POSTED_H,
-output logic                     FULL_POSTED_D,
 
-output logic                     FULL_NONPOSTED_H,
-output logic                     FULL_NONPOSTED_D,
+input   logic                    TLP_START_BIT_IN,
+input   logic                    TLP_END_BIT_IN, 
+input   logic  [7:0]             TLP_TAG_IN,
+input   logic [15:0]             TLP_ID_IN,
 
-output logic                     FULL_CMPL_H,
-output logic                     FULL_CMPL_D,
+// input   logic  [2:0]             TLP_MEM_IO_MSG_CPL_COMP_IN,
+
+
+output  logic                    TLP_START_BIT_OUT_COMB,
+output  logic                    TLP_END_BIT_OUT_COMB,
+
+output   logic  [7:0]             TLP_TAG_OUT,
+output   logic [15:0]             TLP_ID_OUT,
+
+// output   logic  [2:0]             TLP_MEM_IO_MSG_CPL_COMP_OUT,
+
+output logic [1:0]              P_NP_CPL_OUT,
 
 output logic [DATA_WIDTH-1:0]    OUT_TLP_DW,      
-output logic [DATA_WIDTH-1:0]    OUT_TLP_DW_COMB      
+output logic [DATA_WIDTH-1:0]    OUT_TLP_DW_COMB,
+
+
+output wire                      EMPTY,
+
+
+
+//Not Improtant XXX
+output logic                     FULL_POSTED_H,
+output logic                     FULL_POSTED_D,
+output logic                     FULL_NONPOSTED_H,
+output logic                     FULL_NONPOSTED_D,
+output logic                     FULL_CMPL_H,
+output logic                     FULL_CMPL_D
+
+
 );
 logic                     OUT_EMPTY;
 
 logic           HEADER_DATA_OUT;
-logic [1:0]     P_NP_CPL_OUT;
+
+logic           TLP_START, TLP_END;
+
 logic           HEADER_DATA_OUT_REG;
 logic [1:0]     P_NP_CPL_OUT_REG;
+logic           TLP_START_REG, TLP_END_REG;
 
 localparam [1:0] POSTED = 2'b00,
                  NONPOSTED = 2'b01,
@@ -49,7 +77,7 @@ localparam [1:0] POSTED = 2'b00,
 
 reg PWrEn, NPWrEn, CPLWrEn;
 reg PRdEn, NPRdEn, CPLRdEn;
-
+localparam LOG_WIDTH = 29;
 
 reg  [DATA_WIDTH-1:0] POSTED_OUT_TLP_DW;
 reg  [DATA_WIDTH-1:0] NONPOSTED_OUT_TLP_DW;
@@ -59,17 +87,17 @@ reg  [DATA_WIDTH-1:0] POSTED_OUT_TLP_DW_COMB;
 reg  [DATA_WIDTH-1:0] NONPOSTED_OUT_TLP_DW_COMB;
 reg  [DATA_WIDTH-1:0] CPL_OUT_TLP_DW_COMB;
 
-wire [2:0]            BUFF_LOG_DATA;
+wire [LOG_WIDTH-1:0]            BUFF_LOG_DATA;
 wire                  SEQUENCE_LOGGER_EMPTY;
 
 reg                   POSTED_OUT_EMPTY;
 reg                   NONPOSTED_OUT_EMPTY;
 reg                   CPL_OUT_EMPTY;
 
-assign BUFF_LOG_DATA = {P_NP_CPL,  HEADER_DATA};
+assign BUFF_LOG_DATA = {P_NP_CPL, HEADER_DATA, TLP_START_BIT_IN, TLP_END_BIT_IN, TLP_TAG_IN, TLP_ID_IN/* , TLP_MEM_IO_MSG_CPL_COMP_IN */};
 
 assign EMPTY = SEQUENCE_LOGGER_EMPTY;
-RX_FIFO #(.ADDR_WIDTH(7), .DATA_WIDTH(3)) SEQUENCE_LOGGER
+RX_FIFO #(.ADDR_WIDTH(7), .DATA_WIDTH(LOG_WIDTH)) SEQUENCE_LOGGER
 (
 .clk(clk),//input  logic        clk, 
 .rst(rst),//input  logic        rst,
@@ -80,8 +108,8 @@ RX_FIFO #(.ADDR_WIDTH(7), .DATA_WIDTH(3)) SEQUENCE_LOGGER
 .commit(commit),
 
 .DataIn(BUFF_LOG_DATA),//input  logic [DATA_WIDTH-1:0] DataIn,
-.DataOut({P_NP_CPL_OUT_REG, HEADER_DATA_OUT_REG}),//output logic [DATA_WIDTH-1:0] DataOut,
-.comb_DataOut({P_NP_CPL_OUT, HEADER_DATA_OUT}),//output logic [DATA_WIDTH-1:0] comb_DataOut,
+.DataOut({P_NP_CPL_OUT_REG, HEADER_DATA_OUT_REG, TLP_START_REG, TLP_END_REG}),//output logic [DATA_WIDTH-1:0] DataOut,
+.comb_DataOut({P_NP_CPL_OUT, HEADER_DATA_OUT, TLP_START_BIT_OUT_COMB, TLP_END_BIT_OUT_COMB, TLP_TAG_OUT, TLP_ID_OUT/* , TLP_MEM_IO_MSG_CPL_COMP_OUT */}),//output logic [DATA_WIDTH-1:0] comb_DataOut,
 //output logic        Full, 
 .Empty(SEQUENCE_LOGGER_EMPTY)//output logic        Empty 
 );

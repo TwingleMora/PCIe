@@ -191,7 +191,7 @@ begin
         end
     end
     else begin
-        if(axil_write_ready) begin
+        if(axil_write_ready) begin //you're not allowed to write once any problem happen
             if(awskd_addr!=1) begin
                 INPUTS[1][16]<=1'b0;//it doesn't matter whether it's 
             end

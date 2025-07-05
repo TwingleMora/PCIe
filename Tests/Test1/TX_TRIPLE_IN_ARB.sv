@@ -1,5 +1,5 @@
 //ARB: ARBITER
-module TX_TRIPLE_IN_ARB #(parameter DATA_WIDTH = 128)
+module TX_TRIPLE_IN_ARB #(parameter DATA_WIDTH = 128, parameter DATA_WIDTH2 = 32)
 
 (
 input   logic    [2:0]              cpl_tlp_mem_io_msg_cpl_conf,
@@ -19,6 +19,15 @@ input   logic    [15:0]             cpl_dest_bdf_id,
 // input   logic    [31:0]         cpl_data3,
 
 input   logic   [DATA_WIDTH-1:0]    cpl_data,
+
+  /////////////////////////////////////////////////////
+ ////////////////////FIFO TX//////////////////////////
+/////////////////////////////////////////////////////
+input   logic   [DATA_WIDTH2-1:0]   cpl_data2,
+input   logic                       cpl_wr_en,
+output  logic                       cpl_rd_en,
+/////////////////////////////////////////////////////
+/////////////////////////////////////////////////////
 
 input   logic    [9:0]              cpl_config_dw_number,
 
@@ -58,9 +67,9 @@ output  logic                       MSG_ARB_ACK,
 
 
 //REQ_INTF
-// input   logic    [31:0]             req_data1,
-// input   logic    [31:0]             req_data2,
-// input   logic    [31:0]             req_data3,
+// input   logic    [31:0]          req_data1,
+// input   logic    [31:0]          req_data2,
+// input   logic    [31:0]          req_data3,
 input   logic    [2:0]              req_tlp_mem_io_msg_cpl_conf,
 input   logic                       req_tlp_address_32_64,
 input   logic                       req_tlp_read_write,
@@ -72,38 +81,56 @@ input   logic    [11:0]             req_byte_count,
 input   logic    [31:0]             req_lower_addr,
 input   logic    [31:0]             req_upper_addr,
 input   logic    [15:0]             req_dest_bdf_id,
-input   logic   [DATA_WIDTH-1:0]    req_data,
-input   logic    [9:0]              req_config_dw_number,
-input   logic    [2:0]              req_completion_status,
-input   logic    [7:0]              req_message_code,
-input   logic                       req_valid,
-output  logic                       REQ_ARB_ACK,
+input   logic    [DATA_WIDTH-1:0]   req_data,
+
+  /////////////////////////////////////////////////////
+ ////////////////////FIFO TX/////////////////////////
+/////////////////////////////////////////////////////
+input    logic    [DATA_WIDTH2-1:0]   req_data2,
+input    logic                        req_wr_en,
+output   logic                        req_rd_en,
+/////////////////////////////////////////////////////
+/////////////////////////////////////////////////////
+
+input   logic    [9:0]               req_config_dw_number,
+input   logic    [2:0]               req_completion_status,
+input   logic    [7:0]               req_message_code,
+input   logic                        req_valid,
+output  logic                        REQ_ARB_ACK,
 //-------------------------------------------------------------
 //-------------------------------------------------------------
 
 output   logic    [2:0]             x_tlp_mem_io_msg_cpl_conf,
-output   logic                      x_tlp_address_32_64,
-output   logic                      x_tlp_read_write,
-output   logic    [2:0]             x_TC,
-output   logic    [2:0]             x_ATTR,
-output   logic    [15:0]            x_requester_id,
-output   logic    [7:0]             x_tag,
-output   logic    [11:0]            x_byte_count,
-output   logic    [31:0]            x_lower_addr,
-output   logic    [31:0]            x_upper_addr,
-output   logic    [15:0]            x_dest_bdf_id,
+output   logic                      x_tlp_address_32_64      ,
+output   logic                      x_tlp_read_write         ,
+output   logic    [2:0]             x_TC                     ,
+output   logic    [2:0]             x_ATTR                   ,
+output   logic    [15:0]            x_requester_id           ,
+output   logic    [7:0]             x_tag                    ,
+output   logic    [11:0]            x_byte_count             ,
+output   logic    [31:0]            x_lower_addr             ,
+output   logic    [31:0]            x_upper_addr             ,
+output   logic    [15:0]            x_dest_bdf_id            ,
 
-// output   logic    [31:0]         x_data1,
-// output   logic    [31:0]         x_data2,
-// output   logic    [31:0]         x_data3,
-output   logic   [DATA_WIDTH-1:0]   x_data,
+// output   logic    [31:0]           x_data1,
+// output   logic    [31:0]           x_data2,
+// output   logic    [31:0]           x_data3,
+output   logic   [DATA_WIDTH-1 :0]    x_data                 ,
 
-output   logic    [9:0]             x_config_dw_number,
+  /////////////////////////////////////////////////////
+ ////////////////////FIFO TX/////////////////////////
+/////////////////////////////////////////////////////
+output   logic   [DATA_WIDTH2-1:0]    x_data2,
+output   logic                        x_wr_en,
+input    logic                        x_rd_en,
+/////////////////////////////////////////////////////
+/////////////////////////////////////////////////////
 
-output   logic    [2:0]             x_completion_status,
-output   logic    [7:0]             x_message_code,
-output   logic                      x_valid,
-input    logic                      X_ARB_ACK
+output   logic    [9:0]               x_config_dw_number,
+output   logic    [2:0]               x_completion_status,
+output   logic    [7:0]               x_message_code,
+output   logic                        x_valid,
+input    logic                        X_ARB_ACK
 
 
 );
@@ -122,13 +149,22 @@ always@(*) begin
         x_ATTR = 0;
         x_requester_id  = 0;
         x_tag  = 0;
-        x_byte_count    = 0    ;
-        x_lower_addr    =   0  ;
-        x_upper_addr    =    0 ;
+        x_byte_count    =     0 ;
+        x_lower_addr    =     0 ;
+        x_upper_addr    =     0 ;
         x_dest_bdf_id    =    0 ;
 
-        x_data          =     0;
+        x_data          =     0 ;
 
+  /////////////////////////////////////////////////////
+ ////////////////////FIFO TX/////////////////////////
+/////////////////////////////////////////////////////
+        x_data2         =       0;
+        x_wr_en         =       0;
+        cpl_rd_en       =       0;
+        req_rd_en       =       0;
+/////////////////////////////////////////////////////
+/////////////////////////////////////////////////////
         x_config_dw_number    =    0 ;
 
         x_completion_status    =    0 ;
@@ -152,6 +188,15 @@ always@(*) begin
         x_dest_bdf_id    =    cpl_dest_bdf_id ;
 
         x_data          =     cpl_data;
+        
+  /////////////////////////////////////////////////////
+ ////////////////////FIFO TX/////////////////////////
+/////////////////////////////////////////////////////
+        x_data2         =       cpl_data2;
+        x_wr_en         =       cpl_wr_en;
+        cpl_rd_en       =       x_rd_en; 
+/////////////////////////////////////////////////////
+/////////////////////////////////////////////////////
 
         x_config_dw_number    =    cpl_config_dw_number ;
 
@@ -176,6 +221,7 @@ always@(*) begin
         x_dest_bdf_id    =    msg_dest_bdf_id ;
 
         x_data          =     msg_data;
+        
 
         x_config_dw_number    =    msg_config_dw_number ;
 
@@ -186,27 +232,36 @@ always@(*) begin
         MSG_ARB_ACK = X_ARB_ACK;
     end
     REQUEST: begin
-        x_tlp_mem_io_msg_cpl_conf    =  req_tlp_mem_io_msg_cpl_conf;
-        x_tlp_address_32_64    =   req_tlp_address_32_64  ;
-        x_tlp_read_write    =   req_tlp_read_write  ;
-        x_TC    =   req_TC  ;
-        x_ATTR    = req_ATTR    ;
-        x_requester_id    = req_requester_id    ;
-        x_tag    =   req_tag  ;
-        x_byte_count    = req_byte_count    ;
-        x_lower_addr    =   req_lower_addr  ;
-        x_upper_addr    =    req_upper_addr ;
-        x_dest_bdf_id    =    req_dest_bdf_id ;
+        x_tlp_mem_io_msg_cpl_conf    =    req_tlp_mem_io_msg_cpl_conf;
+        x_tlp_address_32_64          =    req_tlp_address_32_64  ;
+        x_tlp_read_write             =    req_tlp_read_write  ;
+        x_TC                         =    req_TC  ;
+        x_ATTR                       =    req_ATTR    ;
+        x_requester_id               =    req_requester_id    ;
+        x_tag                        =    req_tag  ;
+        x_byte_count                 =    req_byte_count    ;
+        x_lower_addr                 =    req_lower_addr  ;
+        x_upper_addr                 =    req_upper_addr ;
+        x_dest_bdf_id                =    req_dest_bdf_id ;
 
-        x_data          =     req_data;
+        x_data                       =    req_data;
 
-        x_config_dw_number    =    req_config_dw_number ;
+  /////////////////////////////////////////////////////
+ ////////////////////FIFO TX/////////////////////////
+/////////////////////////////////////////////////////
+        x_data2                     =       req_data2;
+        x_wr_en                     =       req_wr_en;
+        req_rd_en                   =       x_rd_en;
+/////////////////////////////////////////////////////
+/////////////////////////////////////////////////////
 
-        x_completion_status    =    req_completion_status ;
-        x_message_code    =     req_message_code;
-        x_valid = req_valid;
+        x_config_dw_number           =    req_config_dw_number ;
 
-        REQ_ARB_ACK = X_ARB_ACK;
+        x_completion_status          =    req_completion_status ;
+        x_message_code               =    req_message_code;
+        x_valid                      =    req_valid;
+
+        REQ_ARB_ACK                  =    X_ARB_ACK;
     end
     
     endcase

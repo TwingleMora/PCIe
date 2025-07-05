@@ -1,6 +1,6 @@
 
 //TL_TX_MALUFACTURED
-module TL_TX_MAL #(parameter BUS_ID = 0,parameter DEVICE_ID = 0, parameter FUNCTION_ID = 0 )
+module TL_TX_MAL #(parameter BUS_ID = 0,parameter DEVICE_ID = 0, parameter FUNCTION_ID = 0, parameter BUS_WIDTH = 128 )
 (
 input   logic                    clk, 
 input   logic                    rst,
@@ -11,9 +11,12 @@ input   logic    [9:0]           port_write_en,
 
 
 // input   logic    [15:0]         device_id, //Enable It Later, But For NoW Conf Space Remains inside the TL_TX
-input   logic    [2:0]           tlp_mem_io_msg_cpl_conf,
-input   logic                    tlp_address_32_64,
-input   logic                    tlp_read_write,
+input   logic    [2:0]          tlp_mem_io_msg_cpl_conf,
+input   logic                   tlp_address_32_64,
+input   logic                   tlp_read_write,
+
+input   logic                   config_type,//type 1, type2
+
 input   logic    [2:0]          TC,
 input   logic    [2:0]          ATTR,
 input   logic    [15:0]         requester_id,
@@ -26,6 +29,15 @@ input   logic    [15:0]         dest_bdf_id,
 input   logic    [31:0]         data1,
 input   logic    [31:0]         data2,
 input   logic    [31:0]         data3,
+////////////////////////////////////////////////////////////
+ /////////////////////////FIFO TX//////////////////////////
+//////////////////////////////////////////////////////////
+input   logic    [31:0]         tx_fifo_data_in,
+// input   logic                   wr_en,
+output   logic                   tx_fifo_rd_en,
+///////////////////////////////////////////////////////////
+ /////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////
 
 input   logic    [9:0]          config_dw_number,
 
@@ -36,22 +48,37 @@ input   logic                   valid,
 // output  logic                   CPL_ARB_ACK,
 
 
-input   logic                   RD_EN, //XXXXX "" GATE LOGIC ""
-output  wire                    ALL_BUFFS_EMPTY,
-output  logic                   VALID_FOR_DL,
-output  logic    [31:0]         OUT_TLP_DW,
+input   logic                            RD_EN, //XXXXX "" GATE LOGIC ""
+output  wire                             ALL_BUFFS_EMPTY,
+output  logic                            VALID_FOR_DL,
+output  logic    [BUS_WIDTH-1:0]         OUT_TLP_DW,
 
-output  logic                   TLP_START_BIT_OUT_COMB,
-output  logic                   TLP_END_BIT_OUT_COMB,
+output  logic                            TLP_START_BIT_OUT_COMB,
+output  logic                            TLP_END_BIT_OUT_COMB,
 
-output  logic                   fsm_started,
-output  logic                   fsm_finished,   
+// output  logic    [2:0]                   TLP_MEM_IO_MSG_CPL_COMP_OUT,
 
-output  logic                   tlp_end_logic,
+output  logic                            fsm_started,
+output  logic                            fsm_finished,   
 
-output logic                    ACK
+output  logic                            tlp_end_logic,
+
+output logic                            ACK,
+
+//-------------------------------------------------------------------
+//-------------------------------------------------------------------
+//-------------------------------------------------------------------
+output logic [7:0]                      NP_TLP_TAG,
+output logic [15:0]                     NP_TLP_REQ_ID,
+
+output logic [1:0]                      P_NP_CPL_OUT
 );
 
+
+logic commit;
+logic flush;
+
+assign flush = 0;
 
 
 //CONNECTIONS (MIDDLE OF THE CHAIN)
@@ -75,13 +102,17 @@ logic  [9:0]                    config_dw_number_reg;
 logic  [2:0]                    completion_status_reg;
 logic                           valid_reg;
 
+logic [7:0]                      TLP_TAG;
+logic [15:0]                     TLP_REQ_ID;
 
+
+logic [2:0]                     TLP_MEM_IO_MSG_CPL_COMP;
 
 ///////// CONF SPACE //////////
 // logic    [15:0]         device_id;
 ///////////////////
 
-logic   [31:0]          TLP;
+logic   [BUS_WIDTH-1:0]          TLP;
 
 // COMPLETION_REQUEST_HANDLER FIFO
 logic   [45:0]          CPL_REQ_HNDL_OUT; //{CPL_REQUESTER_ID[15:0], CPL_REQUESTER_TAG[7:0], REQUESTED_BYTES[11:0], LOWER_ADDRESS[6:0]};
@@ -115,6 +146,15 @@ logic                   tlp_end_flag_enc_2_buff;
 
 logic    [15:0]         device_id;
 
+      //////////////////////////////////////////////
+     ///////////////// NEW FIFO TX ////////////////
+    //////////////////////////////////////////////
+    // logic           wr_en;
+    // logic           rd_en;
+    // logic [31:0]    data_out;
+    // logic           data_out_valid;
+    //////////////////////////////////////////////
+    //////////////////////////////////////////////
 
        //////////////////////////////////////////////////////////////////////////////////
       //////////////////////////////////////////////////////////////////////////////////
@@ -204,6 +244,7 @@ APP_TL_TX_BRIDGE TL_TX_REG_FILE0
     .tlp_mem_io_msg_cpl_conf(tlp_mem_io_msg_cpl_conf),             //input  logic  [1:0]     tlp_mem_io_msg_cpl_conf, //0: mem, 1: io, 2: msg, 3: cpl
     .tlp_address_32_64(tlp_address_32_64),               //input  logic            tlp_address_32_64,  //0: 32-bit address, 1: 64-bit address
     .tlp_read_write(tlp_read_write),                     //input  logic            tlp_read_write,     //0: read, 1: write
+    .config_type(),//<<<<<<<<<<<<<<<
     .completion_status(completion_status),
     // .TC(TC),                        //input  logic  [2:0] TC,
     // .ATTR(ATTR),                    //input  logic  [2:0] ATTR,
@@ -226,6 +267,8 @@ APP_TL_TX_BRIDGE TL_TX_REG_FILE0
 
     .message_code(message_code),
     .valid(valid),                                          //input  logic         valid,
+
+
 
 //    ---------------------------------
 
@@ -260,11 +303,24 @@ APP_TL_TX_BRIDGE TL_TX_REG_FILE0
     
     .message_code_reg(message_code_reg),
 
-    .valid_reg(valid_reg),                                   //output logic         valid_reg
+    .valid_reg(valid_reg)                                   //output logic         valid_reg
     
     
-    
-    .ACK(ACK)
+    // .fsm_finished_pulse(ACK)
+    // .ACK(ACK)
+
+
+
+    ///////////////////////////////////////////////
+    /////////////////FIFO_TX///////////////////////
+    ///////////////////////////////////////////////
+    // /* input   logic [31:0] */    .data_in(data_in),
+    // /* input   logic */           .wr_en(wr_en),
+    // /* input   logic */           .rd_en(rd_en),
+    // /* output  logic */           .data_out(data_out),
+    // /* output  logic */           .data_out_valid(data_out_valid)
+    ///////////////////////////////////////////////
+    ///////////////////////////////////////////////
 );
 
 
@@ -285,7 +341,7 @@ assign {CPL_REQUESTER_ID, CPL_REQUESTER_TAG, REQUESTED_BYTES, LOWER_ADDRESS, CPL
 // ); 
 
 
-TL_TX_ENCODER_COMPL TXCONTROLLER
+/* TL_TX_ENCODER_COMPL */TL_TX_ENCODER_128 TXCONTROLLER
 (
     .clk(clk), //input  logic        clk, 1
     .rst(rst), //input  logic        rst, 2
@@ -297,7 +353,7 @@ TL_TX_ENCODER_COMPL TXCONTROLLER
     .type_(type_reg),//input  logic  [4:0] type_, 5
     .TC(TC_reg),//input  logic  [2:0] TC, 6
     .ATTR(ATTR_reg),//input  logic  [2:0] Attr, 7
-    .requester_id                    (requester_id_reg),
+    .requester_id                   (requester_id_reg),
     .device_id                      (device_id_reg),//input  logic  [15:0] requester_id, 8
     .tag                            (tag_reg),//input  logic  [7:0] tag, 9
 
@@ -307,8 +363,16 @@ TL_TX_ENCODER_COMPL TXCONTROLLER
     .upper_address                  (upper_addr_reg),           //input  logic  [31:0] upper_address, 12
     .bdf_id                         (dest_bdf_id_reg),                                         //input  logic  [15:0] bdf_id, 13
     .config_dw_number               (config_dw_number_reg),          //input  logic  [9:0]  configuration_dw_number, 14
-    .data                           (data_reg),                                                    //input  logic  [31:0] data, 15
 
+    ///////////////////////////////////////////
+    ////////////////FIFO_TX////////////////////
+    ///////////////////////////////////////////
+    /* input   logic  [31:0]  *//* .data() ,*/ //15
+                                .data(tx_fifo_data_in/* data_reg */),//tx_fifo_data_in                                                    //input  logic  [31:0] data, 15
+    /* output  logic         */ .rd_en(tx_fifo_rd_en),
+
+    ///////////////////////////////////////////
+    ///////////////////////////////////////////
 
     .message_code                   (message_code_reg),
 
@@ -336,9 +400,20 @@ TL_TX_ENCODER_COMPL TXCONTROLLER
     
     .data_address(data_address),
     
-    .TLP(TLP)                       //output logic  [31:0] TLP 25
+    .TLP(TLP),                      //output logic  [31:0] TLP 25
 
-    
+    /////////////////////////////////////////////////////
+   ////////////////////FIFO TX/////////////////////////
+  /////////////////////////////////////////////////////
+  .fsm_finished_pulse(ACK),
+  .commit (commit),
+  //--------------------------------------------------------
+  //--------------------------------------------------------
+  .NP_TLP_TAG    (TLP_TAG),
+  .NP_TLP_REQ_ID (TLP_REQ_ID)
+  //-------------------------------------------------------
+  //-------------------------------------------------------
+//   .TLP_MEM_IO_MSG_CPL_COMP(TLP_MEM_IO_MSG_CPL_COMP)
 );
 
 /*
@@ -358,7 +433,30 @@ begin
         VALID_FOR_DL<=next_VALID_FOR_DL;
     end
 end */
-PNPC_BUFF #(.DATA_WIDTH(32)) PNPC_BUFF0
+// PNPC_BUFF #(.DATA_WIDTH(/* 32 */128)) PNPC_BUFF0
+// (
+//     .clk(clk),                              //input  logic                     clk,
+//     .rst(rst),                              //input  logic                     rst,
+//     .HEADER_DATA(HEADER_DATA),              //input  logic                     HEADER_DATA, // 0: Header, 1: Data
+//     .P_NP_CPL(P_NP_CPL),                    //input  logic [1:0]               P_NP_CPL, // Posted: 00, Non-Posted: 01, Completion: 11
+//     .IN_TLP_DW(TLP),                        //input  logic [DATA_WIDTH-1:0]    IN_TLP_DW
+//     .WR_EN(PNPC_BUFF_WR_EN),                //input  logic                     WrEn,
+//     .RD_EN(RD_EN),                          //input  logic                     RdEn,
+
+//     .TLP_START_BIT_IN(tlp_start_flag_enc_2_buff),// input   logic                       TLP_START_BIT_IN,
+//     .TLP_END_BIT_IN(tlp_end_flag_enc_2_buff),// input   logic                       TLP_END_BIT_IN, 
+
+//     .TLP_START_BIT_OUT_COMB(TLP_START_BIT_OUT_COMB),      //output  logic                       TLP_START_BIT_OUT_COMB,
+//     .TLP_END_BIT_OUT_COMB(TLP_END_BIT_OUT_COMB),         // output  logic                       TLP_END_BIT_OUT_COMB
+
+//     .EMPTY(ALL_BUFFS_EMPTY),
+//     //.OUT_EMPTY(OUT_EMPTY),
+//     // .OUT_TLP_DW(OUT_TLP_DW),               //output logic [DATA_WIDTH-1:0]    OUT_TLP_DW    
+//     .OUT_TLP_DW_COMB(OUT_TLP_DW)       
+// );
+
+
+TX_PNPC_BUFF #(.DATA_WIDTH(BUS_WIDTH)) PNPC_BUFF0
 (
     .clk(clk),                              //input  logic                     clk,
     .rst(rst),                              //input  logic                     rst,
@@ -371,13 +469,28 @@ PNPC_BUFF #(.DATA_WIDTH(32)) PNPC_BUFF0
     .TLP_START_BIT_IN(tlp_start_flag_enc_2_buff),// input   logic                       TLP_START_BIT_IN,
     .TLP_END_BIT_IN(tlp_end_flag_enc_2_buff),// input   logic                       TLP_END_BIT_IN, 
 
+    .TLP_TAG_IN (TLP_TAG),
+    .TLP_ID_IN  (TLP_REQ_ID),
+
+    // .TLP_MEM_IO_MSG_CPL_COMP_IN(TLP_MEM_IO_MSG_CPL_COMP),
+
     .TLP_START_BIT_OUT_COMB(TLP_START_BIT_OUT_COMB),      //output  logic                       TLP_START_BIT_OUT_COMB,
     .TLP_END_BIT_OUT_COMB(TLP_END_BIT_OUT_COMB),         // output  logic                       TLP_END_BIT_OUT_COMB
+    
+    .TLP_TAG_OUT(NP_TLP_TAG),
+    .TLP_ID_OUT(NP_TLP_REQ_ID),
+    .P_NP_CPL_OUT(P_NP_CPL_OUT),
 
+    // .TLP_MEM_IO_MSG_CPL_COMP_OUT(TLP_MEM_IO_MSG_CPL_COMP_OUT),
+
+    .commit(commit),
+    .flush(flush),
+    
+    
     .EMPTY(ALL_BUFFS_EMPTY),
-    //.OUT_EMPTY(OUT_EMPTY),
-    // .OUT_TLP_DW(OUT_TLP_DW),               //output logic [DATA_WIDTH-1:0]    OUT_TLP_DW    
-    .OUT_TLP_DW_COMB(OUT_TLP_DW)       
+    .OUT_TLP_DW_COMB(OUT_TLP_DW)
+
+
 );
 
 endmodule
